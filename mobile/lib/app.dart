@@ -32,17 +32,16 @@ class App extends HookConsumerWidget {
     // follows the OS across the selected theme and its pair.
     final effectiveMode = resolved.forcedMode ?? themeMode;
 
-    // Both halves of the Buzz pair enable the branded top-section gradient, so
-    // the stored name alone decides whether it applies; brightness picks the
-    // stops. Building both lets System mode swap them with the OS.
-    final selectedScheme = schemeName ?? defaultSchemeName;
+    // Derive the gradient from the themes that produced each color scheme.
+    // This keeps fallbacks and pinned brightness changes aligned with the
+    // rendered palette rather than the raw persisted selection.
     final buzzLightGradient = buzzTopSectionGradient(
-      selectedScheme,
-      Brightness.light,
+      resolved.lightTheme?.name ?? '',
+      lightScheme.brightness,
     );
     final buzzDarkGradient = buzzTopSectionGradient(
-      selectedScheme,
-      Brightness.dark,
+      resolved.darkTheme?.name ?? '',
+      darkScheme.brightness,
     );
 
     // Eagerly initialize websocket session and lifecycle observer when

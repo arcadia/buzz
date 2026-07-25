@@ -1,14 +1,25 @@
-part of '../settings_page.dart';
+import 'package:flutter/material.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../shared/theme/theme.dart';
+import '../../shared/widgets/avatar_image.dart';
+import '../../shared/widgets/masked_avatar_badge.dart';
+import '../custom_emoji/custom_emoji_provider.dart';
+import '../custom_emoji/custom_emoji_render.dart';
+import 'profile_provider.dart';
+import 'set_status_sheet.dart';
+import 'user_status_provider.dart';
 
 /// Desktop's settings-avatar treatment (`ProfileSettingsCard`): a large centred
 /// avatar with a circular badge notched out of its bottom-right corner. Desktop
 /// puts an edit-photo pencil in that badge; here it carries the status glyph and
 /// opens the status sheet instead. The notch shape — including the fillets where
 /// it meets the avatar's edge — comes from [AvatarBadgeMaskGeometry.badge].
-const _avatarSize = 128.0;
+class SettingsProfileHeader extends ConsumerWidget {
+  const SettingsProfileHeader({super.key});
 
-class _ProfileHeader extends ConsumerWidget {
-  const _ProfileHeader();
+  static const _avatarSize = 128.0;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

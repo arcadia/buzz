@@ -103,15 +103,25 @@ final schemeProvider = NotifierProvider<SchemeNotifier, String?>(
 /// pinned to its own brightness. In [ThemeMode.light] and [ThemeMode.dark] the
 /// theme is coerced to that brightness and the mode is forced, so the OS setting
 /// is ignored.
-({ColorScheme light, ColorScheme dark, ThemeMode? forcedMode}) resolveSchemes(
-  String? schemeName,
-  ThemeMode mode,
-) {
+({
+  ColorScheme light,
+  ColorScheme dark,
+  ThemeColors? lightTheme,
+  ThemeColors? darkTheme,
+  ThemeMode? forcedMode,
+})
+resolveSchemes(String? schemeName, ThemeMode mode) {
   final selected =
       findTheme(schemeName ?? defaultSchemeName) ??
       findTheme(defaultSchemeName);
   if (selected == null) {
-    return (light: lightColorScheme, dark: darkColorScheme, forcedMode: null);
+    return (
+      light: lightColorScheme,
+      dark: darkColorScheme,
+      lightTheme: null,
+      darkTheme: null,
+      forcedMode: null,
+    );
   }
 
   switch (mode) {
@@ -122,25 +132,41 @@ final schemeProvider = NotifierProvider<SchemeNotifier, String?>(
         return (
           light: scheme,
           dark: scheme,
+          lightTheme: selected,
+          darkTheme: selected,
           forcedMode: selected.isDark ? ThemeMode.dark : ThemeMode.light,
         );
       }
       final counterpart = findTheme(pairName) ?? selected;
+      final lightTheme = selected.isDark ? counterpart : selected;
+      final darkTheme = selected.isDark ? selected : counterpart;
       return (
-        light: generateColorScheme(selected.isDark ? counterpart : selected),
-        dark: generateColorScheme(selected.isDark ? selected : counterpart),
+        light: generateColorScheme(lightTheme),
+        dark: generateColorScheme(darkTheme),
+        lightTheme: lightTheme,
+        darkTheme: darkTheme,
         forcedMode: null,
       );
     case ThemeMode.light:
-      final scheme = generateColorScheme(
-        _themeForBrightness(selected, wantDark: false),
+      final theme = _themeForBrightness(selected, wantDark: false);
+      final scheme = generateColorScheme(theme);
+      return (
+        light: scheme,
+        dark: scheme,
+        lightTheme: theme,
+        darkTheme: theme,
+        forcedMode: ThemeMode.light,
       );
-      return (light: scheme, dark: scheme, forcedMode: ThemeMode.light);
     case ThemeMode.dark:
-      final scheme = generateColorScheme(
-        _themeForBrightness(selected, wantDark: true),
+      final theme = _themeForBrightness(selected, wantDark: true);
+      final scheme = generateColorScheme(theme);
+      return (
+        light: scheme,
+        dark: scheme,
+        lightTheme: theme,
+        darkTheme: theme,
+        forcedMode: ThemeMode.dark,
       );
-      return (light: scheme, dark: scheme, forcedMode: ThemeMode.dark);
   }
 }
 

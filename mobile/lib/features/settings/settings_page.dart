@@ -10,24 +10,19 @@ import '../../shared/clipboard_utils.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/theme/theme.dart';
 import '../../shared/widgets/app_list.dart';
-import '../../shared/widgets/avatar_image.dart';
+import '../../shared/widgets/app_list_card.dart';
 import '../../shared/widgets/frosted_app_bar.dart';
 import '../../shared/widgets/frosted_scaffold.dart';
-import '../../shared/widgets/masked_avatar_badge.dart';
-import '../custom_emoji/custom_emoji_provider.dart';
-import '../custom_emoji/custom_emoji_render.dart';
-import '../profile/profile_provider.dart';
-import '../profile/set_status_sheet.dart';
-import '../profile/user_status_provider.dart';
 import 'accent_picker_page.dart';
 import 'theme_picker_page.dart';
 
 part 'settings_page/appearance_section.dart';
 part 'settings_page/connection_section.dart';
-part 'settings_page/profile_header.dart';
 
 class SettingsPage extends HookConsumerWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, required this.profileHeader});
+
+  final Widget profileHeader;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -44,11 +39,11 @@ class SettingsPage extends HookConsumerWidget {
                 top: frostedAppBarHeight(context),
                 bottom: Grid.xs,
               ),
-              children: const [
-                _ProfileHeader(),
-                _AppearanceSection(),
-                _ConnectionSection(),
-                _RemoveCommunitySection(),
+              children: [
+                profileHeader,
+                const _AppearanceSection(),
+                const _ConnectionSection(),
+                const _RemoveCommunitySection(),
               ],
             ),
           ),

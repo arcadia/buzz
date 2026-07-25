@@ -20,6 +20,7 @@ import '../custom_emoji/custom_emoji_provider.dart';
 import '../custom_emoji/custom_emoji_render.dart';
 import '../profile/profile_avatar.dart';
 import '../profile/profile_provider.dart';
+import '../profile/settings_profile_header.dart';
 import '../settings/settings_page.dart';
 import '../profile/presence_cache_provider.dart';
 import '../profile/user_cache_provider.dart';
@@ -237,7 +238,10 @@ class ChannelsPage extends HookConsumerWidget {
         actions: [
           ProfileAvatar(
             onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
+              MaterialPageRoute<void>(
+                builder: (_) =>
+                    const SettingsPage(profileHeader: SettingsProfileHeader()),
+              ),
             ),
           ),
         ],

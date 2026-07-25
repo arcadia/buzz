@@ -45,6 +45,8 @@ void main() {
       expect(resolved.forcedMode, isNull);
       expect(resolved.light.brightness, Brightness.light);
       expect(resolved.dark.brightness, Brightness.dark);
+      expect(resolved.lightTheme?.name, buzzThemeName);
+      expect(resolved.darkTheme?.name, buzzDarkThemeName);
 
       expect(
         effectiveTheme(buzzThemeName, ThemeMode.dark)?.name,
@@ -55,6 +57,31 @@ void main() {
         buzzThemeName,
       );
     });
+
+    test(
+      'fallbacks expose the effective Buzz theme for gradient selection',
+      () {
+        final coerced = resolveSchemes('nord', ThemeMode.light);
+        expect(coerced.lightTheme?.name, buzzThemeName);
+        expect(
+          buzzTopSectionGradient(
+            coerced.lightTheme!.name,
+            coerced.light.brightness,
+          ),
+          isNotNull,
+        );
+
+        final unknown = resolveSchemes('not-a-theme', ThemeMode.light);
+        expect(unknown.lightTheme?.name, buzzThemeName);
+        expect(
+          buzzTopSectionGradient(
+            unknown.lightTheme!.name,
+            unknown.light.brightness,
+          ),
+          isNotNull,
+        );
+      },
+    );
   });
 
   group('buzzTopSectionGradient', () {

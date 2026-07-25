@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:buzz/shared/theme/theme.dart';
 import 'package:buzz/shared/widgets/app_list.dart';
+import 'package:buzz/shared/widgets/app_list_card.dart';
 
 Widget _host(Widget child) => MaterialApp(
   theme: AppTheme.light(),

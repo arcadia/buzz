@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/theme.dart';
+import 'app_list_inset.dart';
 
 /// Widest an inline [AppListRow.value] may grow before it ellipsises, leaving
 /// room for a reasonable title beside it.
@@ -10,29 +11,9 @@ const double _maxValueWidth = 180.0;
 /// text most of the time, so it sets how airy a card reads.
 const double _rowVerticalPadding = Grid.xs;
 
-/// The horizontal padding rows use, so rows nested in an [AppListCard] don't
-/// double up on the card's own inset.
-class AppListInset extends InheritedWidget {
-  const AppListInset({
-    super.key,
-    required this.horizontal,
-    required super.child,
-  });
-
-  final double horizontal;
-
-  static double of(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<AppListInset>()?.horizontal ??
-      Grid.gutter;
-
-  @override
-  bool updateShouldNotify(AppListInset oldWidget) =>
-      oldWidget.horizontal != horizontal;
-}
-
 /// A flush, borderless settings/list row: leading icon, title, optional
 /// subtitle and trailing widget. Its own background comes from whatever
-/// contains it — an [AppListCard], or the page itself.
+/// contains it — a grouped card, or the page itself.
 class AppListRow extends StatelessWidget {
   const AppListRow({
     super.key,
@@ -187,86 +168,5 @@ class AppListRowRaw extends StatelessWidget {
 
     if (onTap == null) return row;
     return InkWell(onTap: onTap, child: row);
-  }
-}
-
-/// A group of list rows in a rounded container, with an optional [label] above
-/// it. Rows inside are hairline-separated and inset to the card rather than the
-/// page, via [AppListInset].
-class AppListCard extends StatelessWidget {
-  const AppListCard({super.key, this.label, required this.children});
-
-  /// Rendered above the card in sentence case, as written — no uppercasing.
-  final String? label;
-
-  final List<Widget> children;
-
-  static const _inset = Grid.xs;
-
-  /// Separators start at the label column, clearing the leading icon.
-  static const _dividerIndent = _inset + _iconColumnWidth;
-  static const _iconColumnWidth = 22.0 + Grid.xs;
-
-  @override
-  Widget build(BuildContext context) {
-    final separated = <Widget>[];
-    for (var index = 0; index < children.length; index++) {
-      if (index > 0) {
-        separated.add(
-          Divider(
-            height: 1,
-            thickness: 1,
-            indent: _dividerIndent,
-            endIndent: _inset,
-            // The scheme's own border tokens are derived from the page surface,
-            // which lands them within a few levels of the card fill — invisible.
-            // Tinting with the text color instead keeps the hairline readable on
-            // the card in both brightnesses.
-            color: context.colors.onSurface.withValues(alpha: 0.12),
-          ),
-        );
-      }
-      separated.add(children[index]);
-    }
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        Grid.gutter,
-        Grid.xxs,
-        Grid.gutter,
-        Grid.xxs,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (label != null)
-            Padding(
-              padding: const EdgeInsets.only(left: Grid.half, bottom: Grid.xxs),
-              child: Text(
-                label!,
-                style: context.textTheme.labelMedium?.copyWith(
-                  color: context.colors.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          Material(
-            // The softest step on the elevation ramp — a rung below the home tab
-            // bar's active pill (primaryContainer, see PR #2810), since a
-            // full-width card at the pill's contrast reads heavier than the pill
-            // does. The dividers carry the group structure, so the fill only has
-            // to separate the card from the page.
-            color: context.colors.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(Radii.card),
-            // Keeps row ripples inside the rounded corners.
-            clipBehavior: Clip.antiAlias,
-            child: AppListInset(
-              horizontal: _inset,
-              child: Column(children: separated),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
