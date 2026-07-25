@@ -1,0 +1,5 @@
+# `helm dependency build` materialises the file://../buzz dependency here as a
+# tarball. It is a build artifact of a chart that already lives in this repo —
+# committing it would create a second, silently drifting copy. Argo CD runs
+# `helm dependency build` itself before templating.
+charts/

@@ -1,0 +1,61 @@
+{{- include "buzz-arcadia.validate" . -}}
+{{- if .Values.rds.enabled }}
+# Crossplane RDS Postgres for the relay (events / channels / audit) — decision
+# D5. Same claim schema the litellm module uses
+# (cloud-config-templates modules/litellm/v1/templates/rds/claim.yaml); every
+# field below is required by the composition.
+#
+# Instance class is non-burstable by decree: the litellm-internal readiness RCA
+# (db.t3.medium pinned at CPUCreditBalance=0 -> query latency past the readiness
+# probe -> ALB 460s) applies directly to a relay whose /_readiness touches the
+# database on every check.
+#
+# The bridge (aria-frontend deploy/k8s/aria-buzz-bridge) gets its own database
+# and role on THIS instance via its bootstrap Job — it does not get a claim.
+apiVersion: aws.arcadia.io/v1alpha1
+kind: RDS
+metadata:
+  name: {{ include "buzz-arcadia.rdsClaimName" . }}
+  labels:
+    {{- include "buzz-arcadia.labels" . | nindent 4 }}
+spec:
+  writeConnectionSecretToRef:
+    name: {{ include "buzz-arcadia.rdsConnectionSecretName" . }}
+  deletionPolicy: {{ .Values.rds.deletionPolicy }}
+  description: "Buzz relay PostgreSQL"
+  subnetIds:
+  {{- range .Values.rds.subnetIds }}
+    - {{ . | quote }}
+  {{- end }}
+  cidrBlocks:
+  {{- range .Values.rds.cidrBlocks }}
+    - {{ . | quote }}
+  {{- end }}
+  port: 5432
+  dbInstanceClass: {{ .Values.rds.dbInstanceClass }}
+  engine: postgres
+  engineVersion: {{ .Values.rds.engineVersion | quote }}
+  dbName: {{ .Values.rds.dbName }}
+  allocatedStorage: {{ .Values.rds.allocatedStorage }}
+  multiAZ: {{ .Values.rds.multiAZ }}
+  # Not overridable: this database is only ever reachable from inside the VPC,
+  # and it holds message content (see the phase-2 PHI review, N16).
+  publiclyAccessible: false
+  autoMinorVersionUpgrade: true
+  preferredBackupWindow: {{ .Values.rds.preferredBackupWindow | quote }}
+  preferredMaintenanceWindow: {{ .Values.rds.preferredMaintenanceWindow | quote }}
+  storageEncrypted: true
+  deletionProtection: {{ .Values.rds.deletionProtection }}
+  skipFinalSnapshot: {{ .Values.rds.skipFinalSnapshot }}
+  storageType: {{ .Values.rds.storageType }}
+  masterUsername: {{ .Values.rds.masterUsername }}
+  client: arcadia
+  infrastructure: {{ .Values.infrastructure }}
+  jiraTicketNumber: {{ .Values.rds.jiraTicketNumber | quote }}
+  product: buzz-{{ .Values.clusterName }}
+  risk: {{ .Values.rds.risk }}
+  team: {{ .Values.rds.team }}
+  terminateafter: {{ .Values.rds.terminateafter | quote }}
+  region: {{ .Values.region }}
+  providerConfigRefName: {{ .Values.rds.providerConfigRefName }}
+{{- end }}

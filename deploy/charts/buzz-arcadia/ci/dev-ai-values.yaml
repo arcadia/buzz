@@ -1,0 +1,56 @@
+# dev-ai rendering fixture (account 258174056699, cluster dev-ai).
+#
+# This is the reference for the ArgoCD Application's inline `helm.values` in
+# cloud-config-infrastructures branch `ai-dev`
+# (preprd/dev-ai/buzz/application.yaml, sync-wave 70), with one difference: the
+# nine `account`/`region`/... globals below are NOT written in the Application —
+# the cluster's global-helm-values-patch.yaml appends them as parent-level
+# spec.source.helm.parameters. They are duplicated here so the chart renders
+# standalone:
+#
+#   helm template buzz deploy/charts/buzz-arcadia -f deploy/charts/buzz-arcadia/ci/dev-ai-values.yaml
+#
+# ── injected globals (global-helm-values-patch.yaml, do NOT copy into the app)
+account: "258174056699"
+region: "us-east-1"
+clusterName: "dev-ai"
+clusterEndpoint: "https://4DF475DA277E38CA17B2C71C081C0102.gr7.us-east-1.eks.amazonaws.com"
+infrastructure: "ai-dev"
+oidcProviderId: "4DF475DA277E38CA17B2C71C081C0102"
+argocdNamespace: "argocd"
+domainCertArn: "arn:aws:acm:us-east-1:258174056699:certificate/4679d262-090b-46dd-90b9-0a3e9b6e574b"
+domainHostedZone: "ai-dev.arcadiaanalytics.com"
+
+# ── everything below IS the Application's helm.values ────────────────────────
+rds:
+  claimName: buzz-db
+  dbName: buzz
+  dbInstanceClass: db.m6g.large
+  multiAZ: false
+  deletionProtection: true
+  skipFinalSnapshot: false
+  subnetIds:
+    - subnet-030ae42f02e760072
+    - subnet-0fb83eab49c6b90d2
+    - subnet-0d451196beeeaeb5a
+  cidrBlocks:
+    - 10.54.0.0/17
+    - 10.54.128.0/17
+  # AIFM ticket for the buzz rollout — set before the CCI PR merges.
+  jiraTicketNumber: ""
+
+networkPolicy:
+  allowedIngressCidrs:
+    - 10.54.0.0/17
+    - 10.54.128.0/17
+
+buzz:
+  relayUrl: "wss://buzz.ai-dev.arcadiaanalytics.com"
+  # 64-char lowercase hex, from `buzz-admin generate-key` (pre-flight, N6).
+  # Placeholder value: replace with the real dev-ai owner pubkey in the app.
+  ownerPubkey: "0000000000000000000000000000000000000000000000000000000000000000"
+  replicaCount: 1
+  image:
+    repository: "258174056699.dkr.ecr.us-east-1.amazonaws.com/buzz/relay"
+    # Bumped by the fork's deploy-dev CI job (N1) on every main build.
+    tag: "main-0000000000"

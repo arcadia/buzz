@@ -1,0 +1,34 @@
+apiVersion: v2
+name: buzz-arcadia
+description: |
+  Arcadia deployment wrapper for the vendored upstream buzz relay chart.
+
+  Adds everything the upstream chart deliberately leaves to the operator on an
+  Arcadia EKS cluster: the ESO ExternalSecret that feeds `secrets.existingSecret`,
+  a Crossplane RDS Postgres claim plus the ESO Kubernetes-provider SecretStore
+  that composes DATABASE_URL from the Crossplane connection Secret, an in-cluster
+  Redis (ECR-mirrored image), the internal-ALB Ingress built from the injected
+  cluster globals, and NetworkPolicies scoped to the real VPC CIDRs.
+
+  The relay Deployment/Service/SA/PDB come from the vendored subchart unchanged
+  (zero-diff fork policy, decision D1) — every relay value lives under `buzz:`
+  because Helm passes only `.Values.buzz` to the subchart.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/arcadia/buzz
+sources:
+  - https://github.com/arcadia/buzz
+maintainers:
+  - name: Arcadia AI Platform
+
+dependencies:
+  # file:// dependency on the vendored upstream chart in this same repo. The two
+  # `oci://registry-1.docker.io/cloudpirates` subchart dependencies were removed
+  # from deploy/charts/buzz/Chart.yaml (D1/N2): the clusters have no internet
+  # egress, so `helm dependency build` could never resolve them, and both bundled
+  # services are eval-only (postgresql.enabled / redis.enabled stay false here —
+  # Postgres is RDS via Crossplane, Redis is templates/redis.yaml).
+  - name: buzz
+    version: "0.1.6"
+    repository: "file://../buzz"
