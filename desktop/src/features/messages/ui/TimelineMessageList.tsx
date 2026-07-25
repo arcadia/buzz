@@ -481,14 +481,13 @@ function VirtualizedTimelineRows({
   React.useLayoutEffect(() => {
     previousKeysRef.current = keys;
     if (isPrepend) {
-      cancelBottomSettle();
       clearPrependShift();
     }
     if (!hasInitialPositionedRef.current && items.length > 0) {
       hasInitialPositionedRef.current = true;
       settleAtBottom();
     }
-  }, [cancelBottomSettle, isPrepend, items.length, keys, settleAtBottom]);
+  }, [isPrepend, items.length, keys, settleAtBottom]);
 
   const messageItemIndexById = React.useMemo(() => {
     const byId = new Map<string, number>();

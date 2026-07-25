@@ -509,11 +509,20 @@ test("does not teleport upward when user abandons fetch by jumping to bottom", a
     )
     .toBe("resolved");
 
-  const afterPrepend = await getTimelineMetrics(page);
-  // (a) Geometry: timeline still pinned to bottom.
-  expect(
-    afterPrepend.scrollTop + afterPrepend.clientHeight,
-  ).toBeGreaterThanOrEqual(afterPrepend.scrollHeight - 2);
+  // (a) Geometry: timeline settles back to bottom. The durable bottom owner
+  // batches ResizeObserver-driven geometry correction into requestAnimationFrame,
+  // so scrollHeight growth and the physical-floor write need not share a turn.
+  await expect
+    .poll(
+      async () => {
+        const metrics = await getTimelineMetrics(page);
+        return (
+          metrics.scrollTop + metrics.clientHeight >= metrics.scrollHeight - 2
+        );
+      },
+      { timeout: 2_000 },
+    )
+    .toBe(true);
 
   // (b) DOM: the last rendered [data-message-id] sits within 2px of the
   // timeline's bottom edge. This catches a class of bugs where the geometry
