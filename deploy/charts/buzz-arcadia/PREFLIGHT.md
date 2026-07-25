@@ -53,11 +53,25 @@ mount agent private keys, and the bridge never mounts the relay identity).
 | `agent-key-<slug>` | SecureString | bridge | `buzz-admin generate-key` (Secret key) | one per ARIA agent identity (phase 0: `agent-key-aria`) |
 | `aria-bot-api-token` | SecureString | bridge | aria-bot admin | bridge → `POST https://api.aria.arcadiaanalytics.com/tasks` |
 | `arcadia-docs-mcp-token` | SecureString | bridge | arcadia-docs MCP admin | bridge → arcadia-docs HTTP MCP server |
+| `aria-db-password` | SecureString | bridge | `openssl rand -hex 24` (`--apply` generates it) | the bridge Postgres **role** password: the bootstrap Job creates the role with it, ESO composes `ARIA_DATABASE_URL` from it (chart `database.passwordKeyName`) |
+| `pilot-allowlist` | SecureString | bridge | a human writes it — `<pubkey-hex>:<aria_user_id>:<persona>[:<environment>]`, comma separated | `BUZZ_PILOT_ALLOWLIST` (chart `pilotAllowlist.fromSecret`) — the phase-0 execution gate |
 
-The relay rows are **derived from the chart**, not retyped: `--verify` parses
-`values.yaml`'s `externalSecret.data` and fails on drift between the chart and
-the script. If you add a relay secret to the chart, `--verify` goes red until
-this list catches up — which is the intended behaviour.
+`aria-db-password` is **not** the RDS master password. Crossplane owns that and
+writes it into the connection Secret, which only the bootstrap Job ever reads;
+the bridge Deployment holds a URL for its own least-privileged role and nothing
+else. `pilot-allowlist` is the reason buzz membership confers no ARIA rights: an
+unlisted pubkey gets a refusal and executes nothing, so the parameter must exist
+(an empty value deploys fine and answers nobody).
+
+The rows are **derived from the charts**, not retyped. `--verify` parses the
+relay chart's `externalSecret.data` (exact match) and — when a sibling
+`aria-frontend` checkout exists, or `ARIA_FRONTEND_REPO` points at one — the
+bridge chart's `deploy/k8s/aria-buzz-bridge/values.yaml`, requiring the bridge
+tier to cover every key that chart resolves (extra `agent-key-<slug>` params are
+fine; a buzz environment can host several agent releases). If you add a secret to
+either chart, `--verify` goes red until this list catches up — which is the
+intended behaviour. Without a sibling checkout the bridge half is **skipped with
+a warning**, so run the gate from a workspace that has both.
 
 `git-hook-hmac` is required even though buzz git-forge is not adopted: the relay
 rejects a secret shorter than 32 characters at startup (`config.rs:865`) and
@@ -69,7 +83,7 @@ Each of these was wrong in an earlier draft of the plan; the reasons are load-be
 
 | Not created | Why |
 |---|---|
-| `database-url` | The Crossplane RDS endpoint does not exist until the first sync provisions the instance, and Crossplane writes `username`/`password`/`endpoint` as separate keys — it never emits a URL. The chart composes `DATABASE_URL` in the `ExternalSecret` target template from the connection Secret (decision **O3**). |
+| `database-url` | The Crossplane RDS endpoint does not exist until the first sync provisions the instance, and Crossplane writes `username`/`password`/`endpoint` as separate keys — it never emits a URL. The chart composes `DATABASE_URL` in the `ExternalSecret` target template from the connection Secret (decision **O3**). The *URL* is what is absent: the bridge role's password (`aria-db-password`, above) is an SSM parameter, because nothing else mints it. |
 | `redis-url` | Composed in-chart from the Redis Service name + `redis-password`. |
 | `s3-access-key`, `s3-secret-key` | Unprovisionable (a Crossplane `Bucket` claim mints no IAM user) **and** unnecessary — the relay falls back to the AWS default credential chain, i.e. IRSA, when both are empty (decision **D5**, node N18). Phase 0 has no media at all: `BUZZ_GIT_CONFORMANCE_PROBE=false`. |
 | `litellm-key-*` | Fetched at runtime, per enrolled human, by the bridge. Not a deploy-time secret. |
@@ -144,7 +158,8 @@ It does not prove ESO can read them — that depends on the
 the first sync (node N7):
 
 ```bash
-kubectl get externalsecret -n buzz buzz-secrets     # want: SecretSynced
+kubectl get externalsecret -n buzz buzz-secrets          # want: SecretSynced
+kubectl get externalsecret -n buzz buzz-bridge-secrets   # want: SecretSynced (node N7b)
 kubectl get secret -n buzz buzz-secrets -o jsonpath='{.data}' | tr ',' '\n' | cut -d'"' -f2
 ```
 
@@ -169,7 +184,10 @@ not "fix" it by pre-creating a fake connection Secret.
 - [ ] Egress probes archived: `deploy/scripts/reachability.sh --env dev-ai --output …` (node N0a)
 - [ ] `provision-secrets.sh --apply <cluster>` run in the correct account
 - [ ] Relay identity + owner secret key in the team password manager
-- [ ] `provision-secrets.sh --verify <cluster>` exits 0
+- [ ] `pilot-allowlist` written, with at least one real pilot pubkey (the bridge
+      answers nobody without it)
+- [ ] `provision-secrets.sh --verify <cluster>` exits 0 — from a workspace that
+      also has `aria-frontend`, so the bridge-tier drift check actually runs
 - [ ] `buzz.ownerPubkey` in the Application matches `/…/buzz/owner-pubkey`
 - [ ] Relay image tag in the Application is a tag that exists:
       `aws ecr describe-images --repository-name buzz/relay --image-ids imageTag=main-<sha>`

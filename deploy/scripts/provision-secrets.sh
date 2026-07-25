@@ -116,7 +116,12 @@ fi
 #                 sync provisions the instance, and Crossplane emits
 #                 username/password/endpoint as separate keys, never a URL. The
 #                 chart composes DATABASE_URL in the ExternalSecret target
-#                 template from the connection Secret (decision O3).
+#                 template from the connection Secret (decision O3). Note this
+#                 is the URL only: the bridge ROLE's password IS an SSM
+#                 parameter (aria-db-password, bridge tier below) because
+#                 nothing else mints it — Crossplane's connection Secret holds
+#                 the RDS master credentials, which the bridge Deployment must
+#                 never see.
 #   redis-url     composed in-chart from the Redis Service name + the password
 #                 parameter below.
 #   s3-access-key / s3-secret-key
@@ -146,6 +151,8 @@ OWNER_PARAMS=(
 BRIDGE_PARAMS=(
   "aria-bot-api-token|SecureString|bridge|aria-bot admin issues it|bridge -> POST https://api.aria.arcadiaanalytics.com/tasks (node N13)"
   "arcadia-docs-mcp-token|SecureString|bridge|arcadia-docs MCP admin issues it|bridge -> arcadia-docs http MCP server"
+  "aria-db-password|SecureString|bridge|openssl rand -hex 24|bridge Postgres role password (chart database.passwordKeyName): the bootstrap Job CREATEs the role with it and ESO composes ARIA_DATABASE_URL from it. Hex on purpose — it is embedded in a URL."
+  "pilot-allowlist|SecureString|bridge|admin-authored, comma separated <pubkey-hex>:<aria_user_id>:<persona>[:<environment>]|BUZZ_PILOT_ALLOWLIST (chart pilotAllowlist.fromSecret) — phase-0 execution authorization. An unlisted pubkey is refused and executes nothing, so an empty value is a valid but useless deploy."
 )
 
 AGENT_PARAMS=()
@@ -166,21 +173,52 @@ selected_params() {
   fi
 }
 
-# ── drift gate against the chart ────────────────────────────────────────────
-# The relay tier of this inventory must equal the chart's externalSecret.data
-# values. If it does not, one of the two is stale and a deploy will fail in the
-# most expensive way available (all Pods, no message).
-check_chart_drift() {
-  local parser=""
-  command -v python3 >/dev/null 2>&1 && parser=python3
-  [ -z "$parser" ] && command -v python >/dev/null 2>&1 && parser=python
-  if [ -z "$parser" ] || [ ! -f "$CHART_VALUES" ]; then
-    warn "no python and/or no chart values.yaml — skipping the chart drift check."
-    warn "Run --verify from a checkout with python3 available before trusting a green result."
+# ── drift gate against the charts ───────────────────────────────────────────
+# Two ExternalSecrets consume this inventory and they live in two repos (D12).
+# Both tiers are therefore checked against their own chart:
+#
+#   relay tier  == deploy/charts/buzz-arcadia/values.yaml externalSecret.data
+#                  (exact equality; the chart is in this repo, so there is no
+#                  excuse for a mismatch)
+#   bridge tier >= what aria-frontend/deploy/k8s/aria-buzz-bridge resolves
+#                  (superset: one buzz environment can host several agent
+#                  releases, so extra agent-key-<slug> params are normal). Only
+#                  runs when a sibling aria-frontend checkout is present — the
+#                  bridge chart is not in this repo and the pre-flight must
+#                  still work without it.
+#
+# The bridge half exists because the relay-only check let `aria-db-password` and
+# `pilot-allowlist` go missing from this list while the bridge chart consumed
+# them under its defaults: --verify went green, then ESO failed
+# buzz-bridge-secrets all-or-nothing and the bridge never started.
+find_parser() {
+  if command -v python3 >/dev/null 2>&1; then printf 'python3'; return 0; fi
+  if command -v python  >/dev/null 2>&1; then printf 'python';  return 0; fi
+  return 1
+}
+
+# Locates aria-frontend's bridge chart values. Explicit env var wins; otherwise
+# any sibling checkout of the repo (worktrees included) that carries the chart.
+find_bridge_values() {
+  local candidate
+  if [ -n "${ARIA_FRONTEND_REPO:-}" ]; then
+    candidate="${ARIA_FRONTEND_REPO}/deploy/k8s/aria-buzz-bridge/values.yaml"
+    [ -f "$candidate" ] && { printf '%s' "$candidate"; return 0; }
+    return 1
+  fi
+  for candidate in "$(dirname "$REPO_ROOT")"/aria-frontend*; do
+    [ -f "${candidate}/deploy/k8s/aria-buzz-bridge/values.yaml" ] \
+      && { printf '%s' "${candidate}/deploy/k8s/aria-buzz-bridge/values.yaml"; return 0; }
+  done
+  return 1
+}
+
+check_relay_drift() {
+  local parser="$1" chart_tails script_expected
+  if [ ! -f "$CHART_VALUES" ]; then
+    warn "no ${CHART_VALUES} — skipping the relay chart drift check."
     return 0
   fi
-
-  local chart_tails script_expected
   chart_tails="$("$parser" - "$CHART_VALUES" <<'PY'
 import sys, yaml
 with open(sys.argv[1], encoding="utf-8") as fh:
@@ -188,7 +226,7 @@ with open(sys.argv[1], encoding="utf-8") as fh:
 for tail in sorted((values.get("externalSecret") or {}).get("data", {}).values()):
     print(tail)
 PY
-)" || { warn "could not parse ${CHART_VALUES} (PyYAML missing?) — skipping drift check."; return 0; }
+)" || { warn "could not parse ${CHART_VALUES} (PyYAML missing?) — skipping relay drift check."; return 0; }
 
   script_expected="$(for p in "${RELAY_PARAMS[@]}"; do printf 'buzz/%s\n' "${p%%|*}"; done | sort)"
   if [ "$chart_tails" != "$script_expected" ]; then
@@ -199,6 +237,88 @@ PY
     exit 1
   fi
   log "chart drift check: OK (relay keys match externalSecret.data)"
+}
+
+check_bridge_drift() {
+  local parser="$1" bridge_values chart_tails have missing=0 agent_missing=0 tail
+  if ! bridge_values="$(find_bridge_values)"; then
+    warn "no sibling aria-frontend checkout — skipping the BRIDGE chart drift check."
+    warn "Set ARIA_FRONTEND_REPO=/path/to/aria-frontend to enable it. Without it, a key the"
+    warn "bridge chart consumes but this script does not list will pass --verify and then fail"
+    warn "the whole buzz-bridge-secrets ExternalSecret at sync time."
+    return 0
+  fi
+
+  # Mirrors deploy/k8s/aria-buzz-bridge/templates/externalsecret.yaml: the data
+  # map, the agent key (agentKeyName or agent-key-<agent.slug>), the database
+  # role password when database.enabled, and the literal `pilot-allowlist` when
+  # pilotAllowlist.fromSecret. The last two are hardcoded in that template, not
+  # values, which is exactly how they were missed.
+  chart_tails="$("$parser" - "$bridge_values" <<'PY'
+import sys, yaml
+with open(sys.argv[1], encoding="utf-8") as fh:
+    values = yaml.safe_load(fh) or {}
+es = values.get("externalSecret") or {}
+tails = set()
+if es.get("enabled", True):
+    tails.update((es.get("data") or {}).values())
+    slug = (values.get("agent") or {}).get("slug") or ""
+    tails.add(es.get("agentKeyName") or (slug and "agent-key-%s" % slug))
+    db = values.get("database") or {}
+    if db.get("enabled"):
+        tails.add(db.get("passwordKeyName"))
+    if (values.get("pilotAllowlist") or {}).get("fromSecret"):
+        tails.add("pilot-allowlist")
+for tail in sorted(t for t in tails if t):
+    print(tail)
+PY
+)" || { warn "could not parse ${bridge_values} (PyYAML missing?) — skipping bridge drift check."; return 0; }
+
+  have="$(for p in "${BRIDGE_PARAMS[@]}" "${AGENT_PARAMS[@]}"; do printf '%s\n' "${p%%|*}"; done)"
+  while IFS= read -r tail; do
+    [ -n "$tail" ] || continue
+    if printf '%s\n' "$have" | grep -Fxq "$tail"; then continue; fi
+    case "$tail" in
+      agent-key-*)
+        # Not fatal: a second agent release pins its own slug, and this script
+        # is told which ones to act on with --agents.
+        warn "bridge chart's agent key '${tail}' is not in this run's --agents list (${AGENT_SLUGS})."
+        agent_missing=$((agent_missing + 1))
+        ;;
+      *)
+        printf 'FAIL: bridge SSM key list drifted from the bridge chart — missing %s\n' "$tail" >&2
+        missing=$((missing + 1))
+        ;;
+    esac
+  done <<EOF
+$chart_tails
+EOF
+
+  if [ "$missing" -gt 0 ]; then
+    printf '  chart  (%s):\n%s\n' "$bridge_values" "$chart_tails" >&2
+    printf '  script (BRIDGE_PARAMS + AGENT_PARAMS in %s):\n%s\n' "${BASH_SOURCE[0]}" "$have" >&2
+    printf '  Add the missing tails to BRIDGE_PARAMS and PREFLIGHT.md: ESO fails the whole\n' >&2
+    printf '  buzz-bridge-secrets Secret on one missing key, with no log naming it.\n' >&2
+    exit 1
+  fi
+  if [ "$agent_missing" -eq 0 ]; then
+    log "chart drift check: OK (bridge keys cover ${bridge_values})"
+  fi
+}
+
+check_chart_drift() {
+  local parser=""
+  if ! parser="$(find_parser)"; then
+    warn "no python on PATH — skipping the chart drift checks."
+    warn "Run --verify from a checkout with python3 available before trusting a green result."
+    return 0
+  fi
+  if [ "$SCOPE" = relay ] || [ "$SCOPE" = all ]; then
+    check_relay_drift "$parser"
+  fi
+  if [ "$SCOPE" = bridge ] || [ "$SCOPE" = all ]; then
+    check_bridge_drift "$parser"
+  fi
 }
 
 # ── modes ───────────────────────────────────────────────────────────────────
@@ -313,11 +433,26 @@ do_apply() {
       put_param "agent-key-${slug}" SecureString "${kp##* }"
       log "    agent '${slug}' pubkey: ${kp%% *}   <- humans @mention this identity"
     done
+    # The bridge's own Postgres role password. Generated here because nothing
+    # else mints it: Crossplane's connection Secret carries the RDS MASTER
+    # credentials, which the bridge Deployment must never hold. The bootstrap
+    # Job CREATEs the role with this value and the ESO Kubernetes-provider
+    # template composes ARIA_DATABASE_URL from it (decision O3). Hex, so the
+    # value survives being embedded in a URL.
+    put_param aria-db-password SecureString "$(openssl rand -hex 24)"
     log ""
-    log "  aria-bot-api-token and arcadia-docs-mcp-token are issued by their"
-    log "  owning services, not generated here. Create them with:"
+    log "  aria-bot-api-token, arcadia-docs-mcp-token and pilot-allowlist are"
+    log "  authored elsewhere — two are issued by their owning services and the"
+    log "  third is an identity mapping a human writes. Create them with:"
     log "    aws ssm put-parameter --region ${REGION} --name ${SSM_PREFIX}/aria-bot-api-token --type SecureString --value file://<file> --no-overwrite"
     log "    aws ssm put-parameter --region ${REGION} --name ${SSM_PREFIX}/arcadia-docs-mcp-token --type SecureString --value file://<file> --no-overwrite"
+    log "    aws ssm put-parameter --region ${REGION} --name ${SSM_PREFIX}/pilot-allowlist --type SecureString --value file://<file> --no-overwrite"
+    log ""
+    log "  pilot-allowlist format (comma separated, no spaces):"
+    log "    <pubkey-hex>:<aria_user_id>:<persona>[:<environment>]"
+    log "  It is the phase-0 execution gate: a mention from a pubkey that is not"
+    log "  on it is refused and runs nothing. Relay membership grants chat, never"
+    log "  ARIA execution."
     log ""
   fi
 
