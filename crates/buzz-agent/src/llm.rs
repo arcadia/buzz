@@ -313,7 +313,7 @@ impl Llm {
             .openai_request_for_model(cfg, &request_model, &mut build)
             .await;
         match first {
-            Err(PostError::MeshUnavailable(detail)) if adaptive_mesh => {
+            Err(PostError::MeshFallback(detail)) if adaptive_mesh => {
                 let now = Instant::now();
                 let mut state = self.mesh_auto_state.lock().await;
                 state.last_checked = Some(now);
@@ -326,7 +326,7 @@ impl Llm {
                     attempted_model = MESH_VIRTUAL_MODEL_ID,
                     fallback_model = MESH_AUTO_MODEL_ID,
                     provider_message = detail,
-                    "relay-mesh auto: collective model became unavailable; retrying once with auto"
+                    "relay-mesh auto: collective request failed; retrying once with auto"
                 );
                 self.openai_request_for_model(cfg, MESH_AUTO_MODEL_ID, &mut build)
                     .await
@@ -1271,21 +1271,23 @@ fn terminal_llm_error(elapsed: std::time::Duration, attempts: u32, detail: &str)
     ))
 }
 
-/// Internal HTTP failure that preserves mesh-llm's pre-inference eligibility
-/// rejection as a typed signal. It is consumed inside `openai_request`: an
-/// adaptive `auto` call falls back once, while an explicit `mesh` call is
-/// surfaced as the ordinary LLM error callers already understand.
+/// Internal HTTP failure that preserves a mesh-specific MoA failure as a
+/// typed signal. This covers both pre-inference eligibility rejection and a
+/// structured `moa_failure` from workers/reducers. It is consumed inside
+/// `openai_request`: an adaptive `auto` call falls back once, while an explicit
+/// `mesh` call is surfaced as the ordinary LLM error callers already
+/// understand.
 #[derive(Debug)]
 enum PostError {
     Agent(AgentError),
-    MeshUnavailable(String),
+    MeshFallback(String),
 }
 
 impl PostError {
     fn into_agent(self) -> AgentError {
         match self {
             Self::Agent(error) => error,
-            Self::MeshUnavailable(detail) => AgentError::Llm(detail),
+            Self::MeshFallback(detail) => AgentError::Llm(detail),
         }
     }
 }
@@ -1309,11 +1311,24 @@ fn is_mesh_moa_unavailable_body(body: &str) -> bool {
         == Some(MESH_MOA_UNAVAILABLE_MESSAGE)
 }
 
+fn is_mesh_moa_failure_body(body: &str) -> bool {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .pointer("/error/type")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .as_deref()
+        == Some("moa_failure")
+}
+
 async fn post<F>(
     http: &Client,
     url: &str,
     body: &Value,
-    detect_mesh_unavailable: bool,
+    detect_mesh_fallback: bool,
     apply: F,
 ) -> Result<Value, PostError>
 where
@@ -1365,11 +1380,12 @@ where
         }
         if status.is_server_error() || status == 429 || status.as_u16() == 499 {
             let body = read_error_body(resp).await;
-            if detect_mesh_unavailable
-                && status == reqwest::StatusCode::SERVICE_UNAVAILABLE
-                && is_mesh_moa_unavailable_body(&body)
-            {
-                return Err(PostError::MeshUnavailable(format!("{status}: {body}")));
+            let mesh_fallback = detect_mesh_fallback
+                && (status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+                    && is_mesh_moa_unavailable_body(&body)
+                    || status.is_server_error() && is_mesh_moa_failure_body(&body));
+            if mesh_fallback {
+                return Err(PostError::MeshFallback(format!("{status}: {body}")));
             }
             if attempt + 1 < MAX_RETRIES {
                 tracing::warn!(
@@ -1560,6 +1576,24 @@ mod tests {
                 }),
             }
         }
+
+        fn moa_failure(status: u16, code: &str, message: &str) -> Self {
+            Self {
+                status,
+                body: json!({
+                    "choices": [{
+                        "finish_reason": "error",
+                        "message": { "content": message, "role": "assistant" },
+                    }],
+                    "error": {
+                        "message": message,
+                        "type": "moa_failure",
+                        "code": code,
+                    },
+                    "model": "mesh",
+                }),
+            }
+        }
     }
 
     async fn spawn_sequence_stub(
@@ -1627,6 +1661,7 @@ mod tests {
                 let status_text = match response.status {
                     200 => "OK",
                     500 => "Internal Server Error",
+                    502 => "Bad Gateway",
                     503 => "Service Unavailable",
                     other => panic!("unsupported stub status: {other}"),
                 };
@@ -1800,6 +1835,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mesh_auto_falls_back_once_when_moa_reducer_fails() {
+        let (base_url, captured) = spawn_sequence_stub(vec![
+            StubHttpResponse::ok(model_catalog(&["model-a", "model-b", "mesh"])),
+            StubHttpResponse::ok(chat_response("warmup")),
+            StubHttpResponse::ok(model_catalog(&["model-a", "model-b", "mesh"])),
+            StubHttpResponse::moa_failure(
+                502,
+                "all_reducers_failed",
+                "Reducer failed: unsupported chat template",
+            ),
+            StubHttpResponse::ok(chat_response("fallback")),
+            StubHttpResponse::ok(chat_response("cooldown")),
+        ])
+        .await;
+        let mut config = cfg(Provider::OpenAi);
+        config.base_url = base_url;
+        config.prefer_mesh_for_auto = true;
+        let llm = Llm::new(&config).unwrap();
+
+        complete_model(&llm, &config, "auto").await.unwrap();
+        expire_mesh_catalog_check(&llm).await;
+        assert_eq!(
+            complete_model(&llm, &config, "auto").await.unwrap().text,
+            "fallback"
+        );
+        assert_eq!(
+            complete_model(&llm, &config, "auto").await.unwrap().text,
+            "cooldown"
+        );
+
+        let requests = captured.lock().await;
+        assert_eq!(
+            posted_models(&requests),
+            vec!["auto", "mesh", "auto", "auto"]
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.path == "/v1/models")
+                .count(),
+            2,
+            "mesh-specific failure must enter cooldown without re-probing"
+        );
+    }
+
+    #[tokio::test]
     async fn mesh_auto_catalog_failure_fails_open_to_auto() {
         let (base_url, captured) = spawn_sequence_stub(vec![
             StubHttpResponse::error(500, "catalog unavailable"),
@@ -1875,6 +1956,24 @@ mod tests {
         ));
         assert!(!is_mesh_moa_unavailable_body(
             &StubHttpResponse::error(503, "some other outage")
+                .body
+                .to_string()
+        ));
+    }
+
+    #[test]
+    fn mesh_failure_classifier_requires_structured_moa_failure_type() {
+        assert!(is_mesh_moa_failure_body(
+            &StubHttpResponse::moa_failure(
+                502,
+                "all_reducers_failed",
+                "Reducer failed: unsupported chat template",
+            )
+            .body
+            .to_string()
+        ));
+        assert!(!is_mesh_moa_failure_body(
+            &StubHttpResponse::error(502, "some other bad gateway")
                 .body
                 .to_string()
         ));
