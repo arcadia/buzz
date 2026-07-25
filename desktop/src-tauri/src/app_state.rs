@@ -108,13 +108,8 @@ pub struct AppState {
     /// In-process mesh-llm node started by Buzz Desktop.
     #[cfg(feature = "mesh-llm")]
     pub mesh_llm_runtime: AsyncMutex<Option<crate::mesh_llm::DesktopMeshRuntime>>,
-    /// Consecutive dead ingress probes observed by the coordinator watchdog
-    /// while a runtime handle was present. Used to debounce eviction so a
-    /// single transient stall (model load/reload, VRAM alloc, GC/mmap pause,
-    /// inference saturation) past the 3s probe budget does not cold-restart a
-    /// healthy runtime (micspiral review, #2304). Reset to 0 on a live probe.
     #[cfg(feature = "mesh-llm")]
-    pub mesh_ingress_dead_probes: std::sync::atomic::AtomicU32,
+    pub mesh_recovery: crate::mesh_llm::MeshRecoveryState,
     /// Runtime-owned shared-compute coordinator. It publishes member-signed
     /// discovery status and reconciles MeshLLM's admission roster; MeshLLM
     /// itself owns direct QUIC/iroh connection establishment.
@@ -230,7 +225,7 @@ pub fn build_app_state() -> AppState {
         #[cfg(feature = "mesh-llm")]
         mesh_llm_runtime: AsyncMutex::new(None),
         #[cfg(feature = "mesh-llm")]
-        mesh_ingress_dead_probes: std::sync::atomic::AtomicU32::new(0),
+        mesh_recovery: crate::mesh_llm::MeshRecoveryState::default(),
         #[cfg(feature = "mesh-llm")]
         mesh_coordinator: AsyncMutex::new(None),
         pending_owned_channels: Mutex::new(std::collections::HashSet::new()),

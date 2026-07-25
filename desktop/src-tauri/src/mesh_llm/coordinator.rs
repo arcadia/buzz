@@ -79,8 +79,7 @@ pub async fn start_coordinator(app: AppHandle) {
         let mut sleep_for = INGRESS_WATCHDOG_BASE;
         loop {
             tokio::time::sleep(sleep_for).await;
-            match crate::commands::mesh_llm::rearm_relay_mesh_for_running_agents(&ingress_app).await
-            {
+            match crate::mesh_llm::rearm_relay_mesh_for_running_agents(&ingress_app).await {
                 Ok(()) => {
                     sleep_for = INGRESS_WATCHDOG_BASE;
                 }
@@ -213,6 +212,16 @@ async fn reconcile_roster(
     let mut request = current_request;
     request.trusted_owner_ids = Some(fresh);
     let mut guard = state.mesh_llm_runtime.lock().await;
+    let startup_pending = match guard.as_ref() {
+        Some(runtime) => runtime.is_starting().await,
+        None => false,
+    };
+    if startup_pending {
+        eprintln!(
+            "buzz-mesh: membership roster changed while client management startup is pending; deferring restart"
+        );
+        return Ok(());
+    }
     let Some(running) = guard.take() else {
         return Ok(());
     };
@@ -222,7 +231,7 @@ async fn reconcile_roster(
     }
     let replacement = crate::mesh_llm::DesktopMeshRuntime::start(request)
         .await
-        .map_err(|error| format!("mesh node restart after roster change failed: {error}"))?;
+        .map_err(|error| format!("mesh node restart after roster change failed: {error:#}"))?;
     *guard = Some(replacement);
     Ok(())
 }
