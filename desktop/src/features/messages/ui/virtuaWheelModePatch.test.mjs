@@ -12,12 +12,13 @@ test("reader wheel retires Virtua shift mode without publishing scroll end", () 
   // Keep the CJS and ESM patch paths symmetric and deliberately narrower than
   // ACTION_SCROLL_END (2), which also idles direction, clears frozen range,
   // flushes pending jumps, and emits UPDATE_SCROLL_END_EVENT.
-  const addedActionBodies = [...patch.matchAll(/\+\s+case 9:\n((?:\+.*\n)+?)(?=\s*})/g)].map(
-    ([, body]) =>
-      body
-        .split("\n")
-        .map((line) => line.replace(/^\+\s*/, "").trim())
-        .filter(Boolean),
+  const addedActionBodies = [
+    ...patch.matchAll(/\+\s+case 9:\n((?:\+.*\n)+?)(?=\s*})/g),
+  ].map(([, body]) =>
+    body
+      .split("\n")
+      .map((line) => line.replace(/^\+\s*/, "").trim())
+      .filter(Boolean),
   );
   assert.deepEqual(addedActionBodies, [["I = 0;"], ["w = 0;"]]);
   assert.match(patch, /\+\s+e\.q\(9\);/);
