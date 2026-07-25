@@ -36,7 +36,7 @@ clusterName: ""          # dev-ai | prd-ai
 clusterEndpoint: ""      # unused by this chart; accepted so the global patch applies cleanly
 infrastructure: ""       # SSM path segment: ai-dev | ai
 oidcProviderId: ""       # unused in phase 0 (no IRSA until N18 media/S3)
-argocdNamespace: "argocd" # unused by this chart; accepted from the global patch
+argocdNamespace: "argocd"  # unused by this chart; accepted from the global patch
 domainCertArn: ""        # ACM wildcard cert for *.<domainHostedZone>
 domainHostedZone: ""     # ai-dev.arcadiaanalytics.com | ai.arcadiaanalytics.com
 
