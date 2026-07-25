@@ -25,12 +25,25 @@ class App extends HookConsumerWidget {
     final schemeName = ref.watch(schemeProvider);
     final authState = ref.watch(authProvider);
 
-    final resolved = resolveSchemes(schemeName);
+    final resolved = resolveSchemes(schemeName, themeMode);
     final lightScheme = applyAccent(resolved.light, accentIndex);
     final darkScheme = applyAccent(resolved.dark, accentIndex);
-    // Default and named schemes can force light or dark mode; otherwise
-    // respect the user's ThemeMode preference.
+    // Light/Dark modes pin the brightness; System leaves it null so Flutter
+    // follows the OS across the selected theme and its pair.
     final effectiveMode = resolved.forcedMode ?? themeMode;
+
+    // Both halves of the Buzz pair enable the branded top-section gradient, so
+    // the stored name alone decides whether it applies; brightness picks the
+    // stops. Building both lets System mode swap them with the OS.
+    final selectedScheme = schemeName ?? defaultSchemeName;
+    final buzzLightGradient = buzzTopSectionGradient(
+      selectedScheme,
+      Brightness.light,
+    );
+    final buzzDarkGradient = buzzTopSectionGradient(
+      selectedScheme,
+      Brightness.dark,
+    );
 
     // Eagerly initialize websocket session and lifecycle observer when
     // authenticated. These providers connect and manage the websocket.
@@ -65,8 +78,14 @@ class App extends HookConsumerWidget {
 
     return MaterialApp(
       title: 'Buzz',
-      theme: AppTheme.light(colorScheme: lightScheme),
-      darkTheme: AppTheme.dark(colorScheme: darkScheme),
+      theme: AppTheme.light(
+        colorScheme: lightScheme,
+        topSectionGradient: buzzLightGradient,
+      ),
+      darkTheme: AppTheme.dark(
+        colorScheme: darkScheme,
+        topSectionGradient: buzzDarkGradient,
+      ),
       themeMode: effectiveMode,
       home: authState.when(
         loading: () => const _SplashScreen(),

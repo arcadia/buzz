@@ -62,6 +62,19 @@ const double _kChannelLabelGap = Grid.xxs;
 const double _kChannelRowVerticalPadding = Grid.xxs + Grid.quarter;
 const double _kChannelLabelInset =
     _kChannelSectionInset + _kChannelLeadingWidth + _kChannelLabelGap;
+
+/// DM avatars are circles, so they fill their box edge to edge where a channel
+/// glyph leaves 4dp of slack inside the same 22dp leading column. Sizing them to
+/// the glyph's ink width keeps the icon-to-label distance identical across both
+/// sections while the labels stay on [_kChannelLabelInset].
+const double _kDmAvatarSize = _kChannelIconSize;
+
+/// The top section's avatars are 32dp circles, which fill their box edge to
+/// edge; the channel rows below lead with an 18dp glyph left-aligned in a 22dp
+/// box at [_kChannelSectionInset]. Edge-aligning the two leaves the circles
+/// looking pushed outward, so the bar is pulled in to sit the avatar's centre
+/// on the channel-icon column (12 + 16 = 28dp against the glyph's ~29dp).
+const double _kTopSectionInset = Grid.twelve;
 const Duration _kSectionExpandDuration = Duration(milliseconds: 220);
 const Duration _kSectionCollapseDuration = Duration(milliseconds: 170);
 const Curve _kSectionExpandCurve = Cubic(0.23, 1, 0.32, 1);
@@ -208,7 +221,11 @@ class ChannelsPage extends HookConsumerWidget {
 
     return FrostedScaffold(
       appBar: FrostedAppBar(
-        horizontalInset: _kChannelSectionInset,
+        horizontalInset: _kTopSectionInset,
+        // Under a Buzz theme the community + account avatar strip carries the
+        // branded gradient, the way desktop paints it across the sidebar. Null
+        // under every other theme, leaving the default frosted fill.
+        gradient: context.appColors.topSectionGradient,
         leading: _CommunityIndicator(
           onTap: () => showModalBottomSheet<void>(
             context: context,
