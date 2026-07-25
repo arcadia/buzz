@@ -99,6 +99,21 @@ test("channel switch settles at the newest message after virtualized rows measur
 
   const timeline = page.getByTestId("message-timeline");
   await expect(timeline).toContainText("switch-bottom 79");
+  // Reflow a rendered row well after the removed 250ms settle deadline. The
+  // geometry-driven bottom intent must still chase the new physical floor.
+  await timeline.evaluate((element) => {
+    window.setTimeout(() => {
+      const row = element.querySelector<HTMLElement>("[data-message-id]");
+      if (row) {
+        row.style.minHeight = `${row.getBoundingClientRect().height + 240}px`;
+      }
+      element.dataset.delayedBottomReflow = "complete";
+    }, 600);
+  });
+  await expect(timeline).toHaveAttribute(
+    "data-delayed-bottom-reflow",
+    "complete",
+  );
   await expect
     .poll(async () => {
       const metrics = await getTimelineMetrics(page);

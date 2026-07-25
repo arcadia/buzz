@@ -623,11 +623,8 @@ function VirtualizedTimelineRows({
     if (!onVirtualizerApiChange) return;
     const api: TimelineVirtualizerApi = {
       scrollToBottom() {
-        retireTimelineSettle();
-        const lastIndex = itemsLengthRef.current - 1;
-        if (lastIndex >= 0) {
-          listRef.current?.scrollToIndex(lastIndex, { align: "end" });
-        }
+        retirePrependAnchor();
+        settleAtBottom();
       },
       settleAtBottom,
       scrollToMessage(messageId) {
@@ -640,7 +637,12 @@ function VirtualizedTimelineRows({
     };
     onVirtualizerApiChange(api);
     return () => onVirtualizerApiChange(null);
-  }, [onVirtualizerApiChange, retireTimelineSettle, settleAtBottom]);
+  }, [
+    onVirtualizerApiChange,
+    retirePrependAnchor,
+    retireTimelineSettle,
+    settleAtBottom,
+  ]);
 
   React.useLayoutEffect(() => {
     const host = hostRef.current;
