@@ -670,7 +670,12 @@ function VirtualizedTimelineRows({
       if (!list || !(scroller instanceof HTMLDivElement)) return;
       onVirtualizerRangeChanged?.();
       const distanceFromBottom = list.scrollSize - list.viewportSize - offset;
-      if (distanceFromBottom > 32) cancelBottomSettle();
+      // Do not infer reader intent from an intermediate virtualizer offset.
+      // Initial channel positioning deliberately chases the floor while rows
+      // are measured; those measurements can briefly report a large gap and
+      // emit `onScroll` without any user input. Cancelling here strands the
+      // channel above its newest message. The settle hook's wheel, pointer,
+      // touch, and key listeners are the authoritative user-interaction gate.
       onAtBottomStateChange?.(distanceFromBottom <= 32);
       if (
         prependAnchorRef.current !== null ||
@@ -686,7 +691,6 @@ function VirtualizedTimelineRows({
     },
     [
       armUpwardMomentum,
-      cancelBottomSettle,
       capturePrependAnchor,
       onAtBottomStateChange,
       onStartReached,

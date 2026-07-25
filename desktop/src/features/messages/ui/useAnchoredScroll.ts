@@ -607,6 +607,11 @@ export function useAnchoredScroll({
     // to the requested target message, or to the bottom by default.
     if (!hasInitializedRef.current) {
       if (isLoading) return;
+      // The virtualized list owns the actual scroll node. Its API registers in
+      // a child layout effect, after this parent hook's first pass; treating
+      // that API-less pass as initialized writes to the inert outer wrapper
+      // and permanently consumes the channel's initial bottom pin.
+      if (virtualizerOwnsPrependAnchoring && !virtualScrollToBottom) return;
       // Establish the initial position before the browser paints. The follow-up
       // frame is a settling pass for content whose measurements land with the
       // commit (fonts, deferred rows, media), not the first bottom pin. Keeping

@@ -68,6 +68,46 @@ async function getMessagePosition(
   }, messageId);
 }
 
+test("channel switch settles at the newest message after virtualized rows measure", async ({
+  page,
+}) => {
+  await installMockBridge(page);
+  await page.goto("/");
+  await page.waitForFunction(
+    () => typeof window.__BUZZ_E2E_EMIT_MOCK_MESSAGE__ === "function",
+  );
+
+  await page.evaluate(() => {
+    const base = Math.floor(Date.now() / 1000);
+    for (let index = 0; index < 80; index += 1) {
+      window.__BUZZ_E2E_EMIT_MOCK_MESSAGE__?.({
+        channelName: "general",
+        content: `switch-bottom ${index} ${"variable-height ".repeat(
+          index % 7,
+        )}`,
+        createdAt: base + index,
+      });
+    }
+  });
+
+  // Open another channel first so this exercises a real channel switch, where
+  // the virtualizer API is temporarily null while the keyed list remounts.
+  await page.getByTestId("channel-random").click();
+  await expect(page.getByTestId("chat-title")).toHaveText("random");
+  await page.getByTestId("channel-general").click();
+  await expect(page.getByTestId("chat-title")).toHaveText("general");
+
+  const timeline = page.getByTestId("message-timeline");
+  await expect(timeline).toContainText("switch-bottom 79");
+  await expect
+    .poll(async () => {
+      const metrics = await getTimelineMetrics(page);
+      return metrics.scrollHeight - metrics.clientHeight - metrics.scrollTop;
+    })
+    .toBeLessThanOrEqual(1);
+  await expect(page.getByTestId("message-scroll-to-latest")).toHaveCount(0);
+});
+
 test("first channel load paints the first window without waiting for the row-floor top-up", async ({
   page,
 }) => {
