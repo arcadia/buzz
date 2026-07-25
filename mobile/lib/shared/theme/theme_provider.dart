@@ -95,6 +95,20 @@ final schemeProvider = NotifierProvider<SchemeNotifier, String?>(
   SchemeNotifier.new,
 );
 
+/// Returns a scheme that can honor [mode] without silently pinning brightness.
+///
+/// System mode only offers paired themes because they have both light and dark
+/// variants. Switching to it from an unpaired or unknown selection therefore
+/// falls back to the first paired theme, matching the picker ordering.
+String? schemeForAppearanceMode(String? schemeName, ThemeMode mode) {
+  if (mode != ThemeMode.system) return schemeName;
+
+  final selected = findTheme(schemeName ?? defaultSchemeName);
+  if (selected != null && isPairedTheme(selected.name)) return schemeName;
+
+  return themeGroups().paired.firstOrNull?.name ?? schemeName;
+}
+
 /// Resolves the selected scheme and appearance [mode] into light and dark
 /// [ColorScheme]s, mirroring desktop's System / Light / Dark behaviour.
 ///

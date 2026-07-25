@@ -174,6 +174,38 @@ void main() {
     });
   });
 
+  group('schemeForAppearanceMode', () {
+    test('system mode replaces an unpaired selection with a paired theme', () {
+      expect(
+        schemeForAppearanceMode('snazzy-light', ThemeMode.system),
+        themeGroups().paired.first.name,
+      );
+      expect(
+        schemeForAppearanceMode('nord', ThemeMode.system),
+        themeGroups().paired.first.name,
+      );
+    });
+
+    test('system mode preserves either half of a paired selection', () {
+      expect(
+        schemeForAppearanceMode('github-light', ThemeMode.system),
+        'github-light',
+      );
+      expect(
+        schemeForAppearanceMode('github-dark', ThemeMode.system),
+        'github-dark',
+      );
+    });
+
+    test('pinned modes preserve an unpaired selection', () {
+      expect(
+        schemeForAppearanceMode('snazzy-light', ThemeMode.light),
+        'snazzy-light',
+      );
+      expect(schemeForAppearanceMode('nord', ThemeMode.dark), 'nord');
+    });
+  });
+
   group('effectiveTheme', () {
     test('system mode keeps the stored selection', () {
       expect(

@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../shared/custom_emoji/custom_emoji_provider.dart';
+import '../../shared/custom_emoji/custom_emoji_render.dart';
 import '../../shared/theme/theme.dart';
 import '../../shared/widgets/avatar_image.dart';
 import '../../shared/widgets/masked_avatar_badge.dart';
-import '../custom_emoji/custom_emoji_provider.dart';
-import '../custom_emoji/custom_emoji_render.dart';
 import 'profile_provider.dart';
 import 'set_status_sheet.dart';
 import 'user_status_provider.dart';

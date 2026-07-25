@@ -96,6 +96,14 @@ class _AppearanceModeSheet extends ConsumerWidget {
                     )
                   : null,
               onTap: () {
+                final schemeName = ref.read(schemeProvider);
+                final compatibleScheme = schemeForAppearanceMode(
+                  schemeName,
+                  option.mode,
+                );
+                if (compatibleScheme != schemeName) {
+                  ref.read(schemeProvider.notifier).setScheme(compatibleScheme);
+                }
                 ref.read(themeProvider.notifier).setMode(option.mode);
                 Navigator.of(context).pop();
               },

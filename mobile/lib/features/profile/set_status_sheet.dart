@@ -5,10 +5,10 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../shared/custom_emoji/custom_emoji.dart';
+import '../../shared/custom_emoji/custom_emoji_provider.dart';
+import '../../shared/custom_emoji/custom_emoji_render.dart';
 import '../../shared/theme/theme.dart';
-import '../custom_emoji/custom_emoji.dart';
-import '../custom_emoji/custom_emoji_provider.dart';
-import '../custom_emoji/custom_emoji_render.dart';
 import '../channels/emoji_picker.dart';
 import 'user_status.dart';
 import 'user_status_provider.dart';
