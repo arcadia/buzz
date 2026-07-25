@@ -19,6 +19,28 @@ just mobile-dev
 cd mobile && flutter run
 ```
 
+### Worktree-aware debug identity
+
+Debug builds produced from a git worktree get a branch label in the app name
+(`Buzz (my-branch)`) and a unique app identifier
+(`com.buzz.buzzMobile.<slug>` on iOS, `xyz.block.buzz.mobile.<slug>` on
+Android), so you can tell which worktree produced a running build and keep
+builds from multiple worktrees installed side by side — mirroring the desktop
+dev experience. Release and profile builds always keep the production
+identity and name.
+
+`just mobile-dev` and `just mobile-build-android` apply this automatically by
+running `scripts/mobile-worktree-env.sh`, which writes two gitignored files:
+
+- `mobile/ios/Flutter/WorktreeOverrides.xcconfig` (included by Debug builds only)
+- `mobile/android/worktree.properties` (read by the debug build type only)
+
+For direct Xcode / Android Studio / `flutter run` development, run
+`./scripts/mobile-worktree-env.sh` from the repo root once per branch switch;
+the persisted files are then picked up by any subsequent build. In the main
+checkout the script is a no-op that removes stale override files, restoring
+the plain `Buzz` identity.
+
 ## Checks
 
 ```bash

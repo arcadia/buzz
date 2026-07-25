@@ -553,6 +553,13 @@ To run the app locally (starts Docker, relay, iOS simulator automatically):
 just mobile-dev
 ```
 
+When run from a git worktree, `just mobile-dev` (and `just
+mobile-build-android`) give the debug build a branch-labelled app name and a
+per-worktree app identifier via `scripts/mobile-worktree-env.sh`, so builds
+from multiple worktrees install side by side. Release builds are unaffected.
+See [mobile/README.md](mobile/README.md) for direct Xcode / Android Studio
+usage.
+
 ### Testing Conventions
 
 - Prefer **widget tests** over unit tests for UI components — test the

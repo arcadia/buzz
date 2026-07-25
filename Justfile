@@ -620,11 +620,12 @@ mobile-check:
 mobile-test:
     unset GIT_DIR GIT_WORK_TREE; cd {{mobile_dir}} && flutter test
 
-# Compile an unsigned Android debug APK
+# Compile an unsigned Android debug APK (worktree-aware debug identity)
 mobile-build-android:
+    ./scripts/mobile-worktree-env.sh
     unset GIT_DIR GIT_WORK_TREE; cd {{mobile_dir}} && flutter build apk --debug --no-pub
 
-# Run the mobile app on iOS simulator
+# Run the mobile app on iOS simulator (worktree-aware debug identity)
 mobile-dev:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -632,6 +633,7 @@ mobile-dev:
         open -a Simulator
         sleep 3
     fi
+    ./scripts/mobile-worktree-env.sh
     cd {{mobile_dir}}
     unset GIT_DIR GIT_WORK_TREE
     flutter run
