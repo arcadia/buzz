@@ -30,13 +30,12 @@ annotations:
 # Optional eval-only subcharts. Production deploys disable both and point
 # externalPostgresql / externalRedis (or secrets.existingSecret) at managed
 # services.
-dependencies:
-  - name: postgres
-    version: "0.19.x"
-    repository: oci://registry-1.docker.io/cloudpirates
-    condition: postgresql.enabled
-    alias: postgresql
-  - name: redis
-    version: "0.30.x"
-    repository: oci://registry-1.docker.io/cloudpirates
-    condition: redis.enabled
+#
+# ARCADIA FORK: the `postgres` and `redis` dependencies
+# (oci://registry-1.docker.io/cloudpirates) are removed here — the deployment
+# clusters have no internet egress, so `helm dependency build` can never resolve
+# them, and both bundled services are eval-only. postgresql.enabled and
+# redis.enabled must stay false (guarded in the buzz-arcadia wrapper); Postgres
+# is a Crossplane RDS claim and Redis is an in-cluster Deployment, both in
+# deploy/charts/buzz-arcadia. Restore this block when merging upstream, then
+# delete it again.
