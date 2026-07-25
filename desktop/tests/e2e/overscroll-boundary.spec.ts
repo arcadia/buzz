@@ -27,6 +27,24 @@ async function dispatchWheelPrevented(
   );
 }
 
+async function moveToLowerScrollBoundary(
+  page: import("@playwright/test").Page,
+  selector: string,
+) {
+  const geometry = await page.locator(selector).evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    return {
+      clientHeight: element.clientHeight,
+      distanceFromBottom:
+        element.scrollHeight - element.clientHeight - element.scrollTop,
+      scrollHeight: element.scrollHeight,
+    };
+  });
+
+  expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight + 1);
+  expect(geometry.distanceFromBottom).toBeLessThanOrEqual(1);
+}
+
 test.beforeEach(async ({ page }) => {
   await installMockBridge(page);
 });
@@ -59,9 +77,13 @@ test("locks viewport rubber-band outside conversation scrollers", async ({
     }),
   ).resolves.toBe(true);
 
+  // Use the lower boundary so this assertion only observes the viewport lock.
+  // Upward wheel events also drive timeline pagination, whose momentum guard
+  // may intentionally preventDefault while an older page is being prepended.
+  await moveToLowerScrollBoundary(page, '[data-testid="message-timeline"]');
   await expect(
     dispatchWheelPrevented(page, '[data-testid="message-timeline"]', {
-      deltaY: -120,
+      deltaY: 120,
     }),
   ).resolves.toBe(false);
 });
@@ -97,10 +119,11 @@ test("locks horizontal viewport pan everywhere", async ({ page }) => {
 
   // A predominantly vertical gesture with slight horizontal drift still
   // reaches the conversation scroller.
+  await moveToLowerScrollBoundary(page, '[data-testid="message-timeline"]');
   await expect(
     dispatchWheelPrevented(page, '[data-testid="message-timeline"]', {
       deltaX: -10,
-      deltaY: -120,
+      deltaY: 120,
     }),
   ).resolves.toBe(false);
 });
