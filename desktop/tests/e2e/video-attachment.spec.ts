@@ -924,6 +924,12 @@ function emitVideoMessage(
   });
 }
 
+function videoPlayerForSha(page: Page, sha: string) {
+  return page.getByTestId("video-player").filter({
+    has: page.locator(`video[src*="${sha}"]`),
+  });
+}
+
 test("right-click menus expose distinct selectors for links, relay video, and off-relay video", async ({
   page,
 }) => {
@@ -976,7 +982,7 @@ test("right-click menus expose distinct selectors for links, relay video, and of
     sha: MENU_RELAY_VIDEO_SHA,
     filename: "relay-clip.mp4",
   });
-  const relayPlayer = page.getByTestId("video-player").last();
+  const relayPlayer = videoPlayerForSha(page, MENU_RELAY_VIDEO_SHA);
   await expect(relayPlayer).toBeVisible();
   // Right-click the player surface. `force` skips the actionability guard: the
   // Play-button overlay sits above the video, but the contextmenu event still
@@ -1022,7 +1028,7 @@ test("right-click menus expose distinct selectors for links, relay video, and of
     sha: MENU_OFF_RELAY_VIDEO_SHA,
     filename: "external-clip.mp4",
   });
-  const offRelayPlayer = page.getByTestId("video-player").last();
+  const offRelayPlayer = videoPlayerForSha(page, MENU_OFF_RELAY_VIDEO_SHA);
   await expect(offRelayPlayer).toBeVisible();
   await offRelayPlayer.click({ button: "right", force: true });
 
