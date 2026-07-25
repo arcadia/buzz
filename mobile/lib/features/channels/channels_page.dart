@@ -20,8 +20,6 @@ import '../../shared/custom_emoji/custom_emoji_provider.dart';
 import '../../shared/custom_emoji/custom_emoji_render.dart';
 import '../profile/profile_avatar.dart';
 import '../profile/profile_provider.dart';
-import '../profile/settings_profile_header.dart';
-import '../settings/settings_page.dart';
 import '../profile/presence_cache_provider.dart';
 import '../profile/user_cache_provider.dart';
 import '../pairing/pairing_page.dart';
@@ -143,7 +141,9 @@ _UnreadChannelState _computeUnreadChannelState({
 }
 
 class ChannelsPage extends HookConsumerWidget {
-  const ChannelsPage({super.key});
+  const ChannelsPage({required this.settingsPageBuilder, super.key});
+
+  final WidgetBuilder settingsPageBuilder;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -237,12 +237,9 @@ class ChannelsPage extends HookConsumerWidget {
         title: const SizedBox.shrink(),
         actions: [
           ProfileAvatar(
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) =>
-                    const SettingsPage(profileHeader: SettingsProfileHeader()),
-              ),
-            ),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute<void>(builder: settingsPageBuilder)),
           ),
         ],
       ),
