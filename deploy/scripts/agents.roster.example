@@ -1,0 +1,22 @@
+# Agent roster for deploy/scripts/smoke-e2e.sh
+#
+# Copy to agents.roster (git-ignored) and fill in the real pubkeys, or point
+# BUZZ_AGENT_ROSTER at a file elsewhere.
+#
+# Format: "<slug> <64-char lowercase hex pubkey>", one per line, # for comments.
+#
+# The pubkey is the PUBLIC half of the agent identity whose private key lives at
+# SSM /<infrastructure>/<clusterName>/buzz/agent-key-<slug>. Every entry must
+# also be a relay member:
+#
+#   kubectl -n buzz exec deploy/buzz -- buzz-admin add-member --pubkey <hex> --role member
+#
+# smoke-e2e.sh uses this file for:
+#   * the roster check (step 3) — every pubkey must appear in `buzz-admin list-members`
+#   * single-agent mode — the first entry is the default mention target
+#   * --team — one mention per agent, asserting no OTHER agent replies
+#
+# Phase 0 is a single generalist agent. Phase 1 grows this to the Axis-A roster
+# in arcadia-aria/personas/agent-team.yaml (node N9).
+
+aria 0000000000000000000000000000000000000000000000000000000000000000
