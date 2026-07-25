@@ -109,6 +109,7 @@ type UseAnchoredScrollOptions = {
   /** Keeps a targeted message centered until the user deliberately scrolls. */
   pinTargetCentered?: boolean;
   onTargetReached?: (messageId: string) => void;
+  virtualCancelBottomIntent?: () => void;
   virtualScrollToMessage?: (
     messageId: string,
     options?: { behavior?: ScrollBehavior },
@@ -229,6 +230,7 @@ export function useAnchoredScroll({
   highlightTargetMessage = true,
   pinTargetCentered = false,
   onTargetReached,
+  virtualCancelBottomIntent,
   virtualScrollToMessage,
   virtualScrollToBottom,
   virtualSettleAtBottom,
@@ -439,6 +441,10 @@ export function useAnchoredScroll({
         `[data-message-id="${messageId}"]`,
       );
       if (virtualizerOwnsPrependAnchoring && virtualScrollToMessage) {
+        // Target navigation owns the viewport before any movement strategy is
+        // chosen. The already-mounted fast path centers the DOM node directly
+        // and would otherwise leave durable bottom intent armed.
+        virtualCancelBottomIntent?.();
         if (el) {
           const rect = el.getBoundingClientRect();
           const containerRect = container.getBoundingClientRect();
@@ -534,6 +540,7 @@ export function useAnchoredScroll({
       highlightMessage,
       pinTargetCentered,
       scrollContainerRef,
+      virtualCancelBottomIntent,
       virtualizerOwnsPrependAnchoring,
       writePinnedCenterScroll,
       virtualScrollToMessage,

@@ -59,25 +59,41 @@ export function useVirtualizedBottomSettle(
     const scroller = hostRef.current?.firstElementChild;
     if (!(scroller instanceof HTMLDivElement)) return;
     const retire = () => cancel();
+    const retireForPointer = (event: PointerEvent) => {
+      // A descendant pointerdown is ordinary row interaction (link, reaction,
+      // thread action), not evidence that the reader took scroll ownership.
+      // Direct scroller hits cover scrollbar/background drag initiation.
+      if (event.target === scroller) cancel();
+    };
+    const retireForWheel = (event: WheelEvent) => {
+      // Ctrl+wheel is browser zoom, not reader navigation. Keep bottom intent
+      // armed so the resulting viewport/content reflow can settle at the new
+      // physical floor.
+      if (!event.ctrlKey) cancel();
+    };
     const retireForScrollKey = (event: KeyboardEvent) => {
       if (
         !event.altKey &&
         !event.ctrlKey &&
         !event.metaKey &&
+        event.target instanceof Node &&
+        scroller.contains(event.target) &&
         !isEditableKeyboardTarget(event.target) &&
         SCROLL_INTENT_KEYS.has(event.key)
       ) {
         cancel();
       }
     };
-    scroller.addEventListener("pointerdown", retire, { passive: true });
-    scroller.addEventListener("touchstart", retire, { passive: true });
-    scroller.addEventListener("wheel", retire, { passive: true });
+    scroller.addEventListener("pointerdown", retireForPointer, {
+      passive: true,
+    });
+    scroller.addEventListener("touchmove", retire, { passive: true });
+    scroller.addEventListener("wheel", retireForWheel, { passive: true });
     window.addEventListener("keydown", retireForScrollKey, true);
     return () => {
-      scroller.removeEventListener("pointerdown", retire);
-      scroller.removeEventListener("touchstart", retire);
-      scroller.removeEventListener("wheel", retire);
+      scroller.removeEventListener("pointerdown", retireForPointer);
+      scroller.removeEventListener("touchmove", retire);
+      scroller.removeEventListener("wheel", retireForWheel);
       window.removeEventListener("keydown", retireForScrollKey, true);
     };
   }, [cancel, hostRef]);

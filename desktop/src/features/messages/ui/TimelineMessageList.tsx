@@ -42,6 +42,7 @@ import { useUpwardPaginationWheel } from "./useUpwardPaginationWheel";
 import { useVirtualizedBottomSettle } from "./useVirtualizedBottomSettle";
 
 export type TimelineVirtualizerApi = {
+  cancelBottomIntent: () => void;
   scrollToBottom: (behavior?: ScrollBehavior) => void;
   settleAtBottom: () => void;
   scrollToMessage: (
@@ -517,6 +518,7 @@ function VirtualizedTimelineRows({
   React.useLayoutEffect(() => {
     if (!onVirtualizerApiChange) return;
     const api: TimelineVirtualizerApi = {
+      cancelBottomIntent: cancelBottomSettle,
       scrollToBottom() {
         settleAtBottom();
       },

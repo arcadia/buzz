@@ -56,6 +56,9 @@ class ElementShim extends EventTargetShim {
   closest() {
     return null;
   }
+  contains(target) {
+    return this === target || this.firstElementChild?.contains(target) === true;
+  }
 }
 
 globalThis.document = {
@@ -78,6 +81,7 @@ globalThis.requestAnimationFrame = (callback) => {
 globalThis.cancelAnimationFrame = (id) => animationFrames.delete(id);
 globalThis.HTMLElement = ElementShim;
 globalThis.HTMLDivElement = ElementShim;
+globalThis.Node = ElementShim;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 process.env.IS_REACT_ACT_ENVIRONMENT = "true";
 Object.defineProperty(globalThis, "window", {
@@ -173,7 +177,7 @@ test("bottom intent follows arbitrarily late virtual geometry changes", async ()
   await act(async () => root.unmount());
 });
 
-for (const eventType of ["pointerdown", "touchstart", "wheel", "keydown"]) {
+for (const eventType of ["pointerdown", "touchmove", "wheel", "keydown"]) {
   test(`${eventType} transfers ownership away from bottom intent`, async () => {
     const { content, refs, root, scroller, writes } = await mountHarness();
     refs.api.current.settle();
@@ -183,6 +187,12 @@ for (const eventType of ["pointerdown", "touchstart", "wheel", "keydown"]) {
       ctrlKey: false,
       key: eventType === "keydown" ? "PageUp" : undefined,
       metaKey: false,
+      target:
+        eventType === "keydown"
+          ? scroller
+          : eventType === "pointerdown"
+            ? scroller
+            : undefined,
       type: eventType,
     });
 
@@ -192,8 +202,51 @@ for (const eventType of ["pointerdown", "touchstart", "wheel", "keydown"]) {
     flushAnimationFrames();
     assert.equal(writes.length, 1);
     await act(async () => root.unmount());
+    assert.equal(
+      scroller.listeners.get(eventType)?.length ?? 0,
+      0,
+      `${eventType} listener is removed on unmount`,
+    );
   });
 }
+
+test("descendant interaction and outside navigation preserve bottom intent", async () => {
+  const { content, refs, root, scroller, writes } = await mountHarness();
+  refs.api.current.settle();
+  const rowControl = new ElementShim();
+  scroller.firstElementChild.firstElementChild = rowControl;
+
+  scroller.dispatchEvent({ target: rowControl, type: "pointerdown" });
+  window.dispatchEvent({
+    altKey: false,
+    ctrlKey: false,
+    key: "PageUp",
+    metaKey: false,
+    target: new ElementShim(),
+    type: "keydown",
+  });
+  resizeObservers
+    .find((observer) => observer.targets?.includes(content))
+    .callback();
+  flushAnimationFrames();
+
+  assert.equal(writes.length, 2);
+  await act(async () => root.unmount());
+});
+
+test("Ctrl+wheel zoom preserves bottom intent through geometry reflow", async () => {
+  const { content, refs, root, scroller, writes } = await mountHarness();
+  refs.api.current.settle();
+
+  scroller.dispatchEvent({ ctrlKey: true, deltaY: -100, type: "wheel" });
+  resizeObservers
+    .find((observer) => observer.targets?.includes(content))
+    .callback();
+  flushAnimationFrames();
+
+  assert.equal(writes.length, 2);
+  await act(async () => root.unmount());
+});
 
 test("typing and editable navigation keys preserve bottom intent", async () => {
   const { content, refs, root, writes } = await mountHarness();
