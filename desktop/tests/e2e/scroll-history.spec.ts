@@ -223,6 +223,7 @@ test("preserves user scroll while older channel history loads", async ({
   const scrollToTop = async () =>
     timeline.evaluate((element) => {
       const container = element as HTMLDivElement;
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
       container.scrollTop = 0;
       container.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
@@ -1705,6 +1706,7 @@ test("channel intro stays hidden while paginating past the timeline cap", async 
   const scrollToTop = async () =>
     timeline.evaluate((element) => {
       const container = element as HTMLDivElement;
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
       container.scrollTop = 0;
       container.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
