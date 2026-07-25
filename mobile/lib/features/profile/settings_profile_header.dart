@@ -145,6 +145,11 @@ class _StatusGlyph extends ConsumerWidget {
           );
         }
       }
+      return Icon(
+        LucideIcons.smile,
+        size: 20,
+        color: context.colors.onSurfaceVariant,
+      );
     }
 
     return Text(emoji, style: const TextStyle(fontSize: 20));
