@@ -1,0 +1,354 @@
+name: build and push relay to ECR
+
+# ARCADIA FORK ONLY (spec node N1). Upstream's docker.yml publishes the public
+# multi-arch image to GHCR and is untouched; this workflow builds the SAME
+# Dockerfile into the two Arcadia AI-account ECRs, because the dev-ai and prd-ai
+# EKS clusters have no internet egress and cannot pull ghcr.io
+# (cloud-config-infrastructures/README.md, "Step 1: mirror the image").
+#
+#   258174056699  dev-ai   (preprd, CCI branch `ai-dev`)
+#   572630832277  prd-ai   (prd,    CCI branch `ai`)
+#
+# Differences from docker.yml, all deliberate:
+#   * linux/amd64 only. The clusters run amd64 nodes; the arm64 half of the
+#     upstream matrix would double CI wall-clock for an image nothing pulls.
+#   * Tag is `main-<first 10 hex of the commit sha>` — the tag shape the ArgoCD
+#     Application carries and the deploy-dev job below rewrites. No :latest, no
+#     :main floating tag: a floating tag plus `imagePullPolicy: IfNotPresent`
+#     silently pins whatever each node cached first.
+#   * Registry build cache in ECR (`buzz/relay-buildcache`), not GHCR. A cold
+#     Rust build of this workspace is 30-60 min; the cache is what keeps the
+#     60-minute timeout below honest.
+#   * No pull_request trigger. A PR build would need an OIDC assume into a
+#     production AWS account from a potentially fork-authored ref. Upstream's
+#     GHCR lane already gives PRs their build signal.
+#   * NO prd deploy job, by decision D10 + SRE-ARIA-CHANGE-CONTROL: the image is
+#     pushed to both accounts so a prd promotion needs no rebuild, but prd
+#     promotion itself is a manual CCI PR with an approved ACM CR, deployer
+#     != implementer.
+#
+# Repo configuration this workflow expects (provisioned by N-1, SRE):
+#   vars.ECR_ROLE_ARN_DEV_AI  GitHub-OIDC role in 258174056699
+#   vars.ECR_ROLE_ARN_PRD_AI  GitHub-OIDC role in 572630832277
+#     Each needs: ecr:GetAuthorizationToken, and on buzz/relay +
+#     buzz/relay-buildcache only — BatchCheckLayerAvailability, PutImage,
+#     InitiateLayerUpload, UploadLayerPart, CompleteLayerUpload,
+#     BatchGetImage, GetDownloadUrlForLayer, DescribeRepositories.
+#     It deliberately does NOT need ecr:CreateRepository — the preflight step
+#     fails with instructions instead of self-provisioning registries.
+#   secrets.REPO_MANAGER_GH_APP_ID / REPO_MANAGER_GH_APP_PRIVATE_KEY
+#     Org-level Actions secrets for the `aa-repository-manager-app` GitHub App
+#     (installed org-wide, contents:write) — the credential the deploy-dev job
+#     uses to write cloud-config-infrastructures. Same pattern as
+#     aria-bot/.github/workflows/bump-vendored-brain.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "crates/**"
+      - "web/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "patches/**"
+      - ".github/workflows/build-and-push-ecr.yml"
+  workflow_dispatch: {}
+
+# Never cancel a publish mid-flight; serialize per ref instead.
+concurrency:
+  group: build-and-push-ecr-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: buzz/relay
+  ECR_CACHE_REPOSITORY: buzz/relay-buildcache
+
+jobs:
+  build-push:
+    name: Build + push buzz/relay (linux/amd64) to both AI accounts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write # OIDC assume into both AI accounts
+    outputs:
+      image-tag: ${{ steps.tag.outputs.image_tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Compose image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          # First 10 hex chars of the commit sha. `main-<short10-sha>` is the
+          # exact shape preprd/dev-ai/buzz/application.yaml carries and the
+          # deploy-dev job's sed guard matches (`main-[0-9a-f]{10}`).
+          echo "image_tag=main-${GITHUB_SHA:0:10}" >> "$GITHUB_OUTPUT"
+          echo "Building ${ECR_REPOSITORY}:main-${GITHUB_SHA:0:10}"
+
+      # ── dev-ai account (258174056699) ────────────────────────────────────
+      - name: Configure AWS credentials (dev-ai)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.ECR_ROLE_ARN_DEV_AI }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to dev-ai ECR
+        id: ecr-dev
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Preflight — dev-ai repositories exist
+        run: |
+          set -euo pipefail
+          # Read-only check. The OIDC role has no ecr:CreateRepository on
+          # purpose (ECR provisioning is SRE's, node N-1), so a missing repo
+          # must fail here with the fix rather than 15 minutes later as an
+          # opaque "name unknown" from the layer push, or — worse for the
+          # cache repo — as a cache-export error that fails a green build.
+          if ! aws ecr describe-repositories --region "$AWS_REGION" \
+              --repository-names "$ECR_REPOSITORY" "$ECR_CACHE_REPOSITORY" >/dev/null; then
+            echo "::error title=ECR repositories missing in dev-ai::Account 258174056699 must have BOTH '${ECR_REPOSITORY}' and '${ECR_CACHE_REPOSITORY}' (node N-1). The buildcache repo is not optional: buildx fails the build when cache export cannot write. Ask SRE to run: aws ecr create-repository --repository-name ${ECR_CACHE_REPOSITORY} --region ${AWS_REGION}"
+            exit 1
+          fi
+
+      # ── prd-ai account (572630832277) ────────────────────────────────────
+      # Second OIDC assume. `unset-current-credentials: true` is REQUIRED:
+      # configure-aws-credentials v4 finds the dev-ai keys this job already
+      # exported and role-chains from them, which fails (dev-ai's role has no
+      # trust relationship with prd-ai's). Clearing them forces a fresh OIDC
+      # token exchange, which is what the two independent roles are for.
+      # The dev-ai docker login stays in ~/.docker/config.json — logins
+      # accumulate per registry host, so one build can push to both.
+      - name: Configure AWS credentials (prd-ai)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.ECR_ROLE_ARN_PRD_AI }}
+          aws-region: ${{ env.AWS_REGION }}
+          unset-current-credentials: true
+
+      - name: Login to prd-ai ECR
+        id: ecr-prd
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Preflight — prd-ai repository exists
+        run: |
+          set -euo pipefail
+          # Only the image repo here; the build cache lives in dev-ai alone
+          # (see the cache-to note on the build step).
+          if ! aws ecr describe-repositories --region "$AWS_REGION" \
+              --repository-names "$ECR_REPOSITORY" >/dev/null; then
+            echo "::error title=ECR repository missing in prd-ai::Account 572630832277 must have '${ECR_REPOSITORY}' (node N-1). It is populated on every main build so a prd promotion is a tag change, never a rebuild."
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          # Default parallelism of 4 OOMs the 7 GB GitHub runner during the
+          # Rust compile — same cap and same reason as docker.yml.
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 2
+
+      - name: Build and push to both account ECRs
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false # ECR manifest lists confuse older EKS pull paths
+          tags: |
+            ${{ steps.ecr-dev.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.image_tag }}
+            ${{ steps.ecr-prd.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.title=Buzz relay (Arcadia)
+            org.opencontainers.image.description=WebSocket relay server for the Buzz communications platform
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.revision=${{ github.sha }}
+          # `image-manifest=true,oci-mediatypes=true` is mandatory for ECR:
+          # ECR rejects buildkit's default cache config media type, and without
+          # these the cache export fails and takes the whole build red.
+          # One cache, in dev-ai: the build runs once, and a second export to
+          # prd-ai would pay the upload twice to warm a cache nothing reads.
+          cache-from: |
+            type=registry,ref=${{ steps.ecr-dev.outputs.registry }}/${{ env.ECR_CACHE_REPOSITORY }}:amd64
+          cache-to: |
+            type=registry,ref=${{ steps.ecr-dev.outputs.registry }}/${{ env.ECR_CACHE_REPOSITORY }}:amd64,mode=max,compression=zstd,image-manifest=true,oci-mediatypes=true
+
+      - name: Summary
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+          DEV_REGISTRY: ${{ steps.ecr-dev.outputs.registry }}
+          PRD_REGISTRY: ${{ steps.ecr-prd.outputs.registry }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Pushed \`${ECR_REPOSITORY}:${IMAGE_TAG}\`"
+            echo
+            echo "| Account | Image |"
+            echo "|---|---|"
+            echo "| dev-ai (258174056699) | \`${DEV_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}\` |"
+            echo "| prd-ai (572630832277) | \`${PRD_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}\` |"
+            echo
+            echo "Verify:"
+            echo '```'
+            echo "aws ecr describe-images --repository-name ${ECR_REPOSITORY} --image-ids imageTag=${IMAGE_TAG} --region ${AWS_REGION}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-dev:
+    name: Bump dev-ai image tag in cloud-config-infrastructures
+    needs: build-push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # nothing here uses the default GITHUB_TOKEN
+
+    # SHARED with aria-frontend's bridge tag-bump job (spec node N5): both jobs
+    # write cloud-config-infrastructures branch `ai-dev`, and this group name is
+    # the contract that says so.
+    #
+    # Read this before trusting it: GitHub concurrency groups are scoped to a
+    # REPOSITORY. Two jobs in two different repos cannot actually share one, no
+    # matter how the group is spelled. The name is kept identical because it is
+    # the documented pairing, and it does serialize this repo's own runs — but
+    # the mechanism that makes a simultaneous relay bump and bridge bump safe is
+    # the fetch/rebase/retry push loop below, not this block. Do not delete the
+    # loop on the strength of this group.
+    concurrency:
+      group: cci-ai-dev-image-tag-bump
+      cancel-in-progress: false
+
+    steps:
+      # Installation token for aa-repository-manager-app, down-scoped to the one
+      # repo it writes. The default GITHUB_TOKEN cannot reach another repo at
+      # all, and a PAT would be org-wide and un-revocable at job end.
+      - name: Mint installation token for cloud-config-infrastructures
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.REPO_MANAGER_GH_APP_ID }}
+          private-key: ${{ secrets.REPO_MANAGER_GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: cloud-config-infrastructures
+          permission-contents: write
+
+      - name: Checkout cloud-config-infrastructures (ai-dev)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cloud-config-infrastructures
+          ref: ai-dev
+          token: ${{ steps.app_token.outputs.token }}
+          path: cci
+          fetch-depth: 0
+
+      - name: Rewrite the relay image tag
+        id: bump
+        working-directory: cci
+        env:
+          IMAGE_TAG: ${{ needs.build-push.outputs.image-tag }}
+          APP_FILE: preprd/dev-ai/buzz/application.yaml
+        run: |
+          set -euo pipefail
+
+          # ── grep guards ───────────────────────────────────────────────────
+          # The Application is authored by node N7 and does not exist until that
+          # PR merges. Missing file is a NO-OP, not a failure: the image is
+          # already in ECR and a red run here would say "the build broke" when
+          # nothing did.
+          if [ ! -f "$APP_FILE" ]; then
+            echo "::notice title=no dev-ai Application yet::${APP_FILE} does not exist on ai-dev (node N7 has not merged). Image ${IMAGE_TAG} is pushed; nothing to bump."
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Match ONLY the relay tag line. `main-[0-9a-f]{10}` also matches the
+          # placeholder N7 ships (main-0000000000) and cannot match the redis
+          # image tag (v8.6.0) or any other `tag:` key in the file. Exactly one
+          # match is required — zero means the file was restructured and the
+          # regex is now lying; more than one means an ambiguous edit. Both are
+          # a hard stop, never a "best effort" sed.
+          TAG_RE='^[[:space:]]*tag: "main-[0-9a-f]\{10\}"[[:space:]]*$'
+          MATCHES="$(grep -c "$TAG_RE" "$APP_FILE" || true)"
+          if [ "$MATCHES" != "1" ]; then
+            echo "::error title=refusing to bump::Expected exactly 1 line matching 'tag: \"main-<10 hex>\"' in ${APP_FILE}, found ${MATCHES}. Someone changed the Application's shape; fix the file or this guard, do not loosen the regex to make a sed land."
+            exit 1
+          fi
+
+          CURRENT="$(grep -o 'main-[0-9a-f]\{10\}' "$APP_FILE" | head -n1)"
+          if [ "$CURRENT" = "$IMAGE_TAG" ]; then
+            echo "Already at ${IMAGE_TAG} — nothing to do."
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          sed -i "s/main-[0-9a-f]\{10\}/${IMAGE_TAG}/" "$APP_FILE"
+
+          # Post-condition: exactly one line changed, and it now carries the new
+          # tag. A sed that silently matched nothing must not commit clean.
+          CHANGED="$(git diff --numstat -- "$APP_FILE" | awk '{print $1"/"$2}')"
+          if [ "$CHANGED" != "1/1" ]; then
+            echo "::error title=unexpected diff::sed produced '${CHANGED}' added/removed lines in ${APP_FILE}; expected 1/1. Nothing committed."
+            git checkout -- "$APP_FILE"
+            exit 1
+          fi
+          grep -q "tag: \"${IMAGE_TAG}\"" "$APP_FILE" || {
+            echo "::error title=tag not written::${APP_FILE} does not contain tag: \"${IMAGE_TAG}\" after sed."
+            exit 1
+          }
+
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+          echo "previous=${CURRENT}" >> "$GITHUB_OUTPUT"
+          git --no-pager diff -- "$APP_FILE"
+
+      - name: Commit and push to ai-dev
+        if: steps.bump.outputs.bumped == 'true'
+        working-directory: cci
+        env:
+          IMAGE_TAG: ${{ needs.build-push.outputs.image-tag }}
+          PREVIOUS: ${{ steps.bump.outputs.previous }}
+          APP_FILE: preprd/dev-ai/buzz/application.yaml
+        run: |
+          set -euo pipefail
+          git config user.name "aa-repository-manager-app[bot]"
+          git config user.email "aa-repository-manager-app[bot]@users.noreply.github.com"
+          git add "$APP_FILE"
+          # Two -m flags, not one multi-line string: a heredoc-style -m inside a
+          # YAML block scalar carries the block's indentation into the commit body.
+          git commit \
+            -m "buzz relay dev-ai image ${PREVIOUS} -> ${IMAGE_TAG}" \
+            -m "Automated bump from ${GITHUB_REPOSITORY}@${GITHUB_SHA}. dev-ai only — prd promotion is a manual PR with an approved ACM CR."
+
+          # Cross-repo write safety. aria-frontend's bridge bump job writes this
+          # same branch, in a different repository, so no concurrency group can
+          # order the two. Rebase and retry on rejection: the two jobs touch
+          # different files, so a rebase is always a clean fast-forward of one
+          # onto the other. Bounded — five failures in a row is not contention,
+          # it is something structural, and it should go red.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:ai-dev; then
+              echo "Pushed on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push rejected (attempt ${attempt}) — someone else wrote ai-dev; rebasing."
+            git fetch origin ai-dev
+            git rebase origin/ai-dev
+            sleep $(( attempt * 3 ))
+          done
+          echo "::error title=could not push tag bump::Five rebase+push attempts against cloud-config-infrastructures ai-dev all failed. The image ${IMAGE_TAG} IS in ECR — recover by editing ${APP_FILE} by hand."
+          exit 1

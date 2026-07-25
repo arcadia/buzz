@@ -37,6 +37,10 @@ on:
   pull_request:
     paths:
       - "deploy/charts/buzz/**"
+      # Arcadia fork: the wrapper chart is linted by `ct lint --all` on main
+      # pushes regardless (ct.yaml chart-dirs is deploy/charts), but without
+      # this line a PR touching ONLY buzz-arcadia gets no chart CI at all.
+      - "deploy/charts/buzz-arcadia/**"
       - "deploy/charts/buzz-push-gateway/**"
       - ".github/workflows/helm-chart.yml"
       - "ct.yaml"
