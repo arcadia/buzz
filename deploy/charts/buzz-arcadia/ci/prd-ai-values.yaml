@@ -52,3 +52,18 @@ buzz:
   image:
     repository: "572630832277.dkr.ecr.us-east-1.amazonaws.com/buzz/relay"
     tag: "main-0000000000"
+
+  # Retention / data-handling (node N16) is DELIBERATELY NOT overridden here.
+  # The chart's `buzz.relay.extraEnv` defaults are already prd-grade
+  # (BUZZ_EPHEMERAL_TTL_OVERRIDE=604800, BUZZ_AUDIT_ENABLED=true,
+  # BUZZ_REQUIRE_MEDIA_GET_AUTH=true, BUZZ_MEDIA_UPLOAD_RECORDS=false) and they
+  # render into this environment unchanged — verify with:
+  #
+  #   helm template buzz deploy/charts/buzz-arcadia -n buzz \
+  #     -f deploy/charts/buzz-arcadia/ci/prd-ai-values.yaml | grep -A1 BUZZ_EPHEMERAL_TTL
+  #
+  # Helm REPLACES lists rather than merging them, so setting `relay.extraEnv`
+  # here would drop every default in one go — including the startup-FATAL
+  # BUZZ_GIT_CONFORMANCE_PROBE=false and the controls signed off in
+  # deploy/PRIVACY-REVIEW.md. If prd ever needs a different value, copy the
+  # WHOLE list out of values.yaml and change the one entry.

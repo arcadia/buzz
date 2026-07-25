@@ -251,9 +251,50 @@ buzz:
 
   relay:
     requireRelayMembership: true
+    # REST API requests must carry token auth. This is already the subchart
+    # default, pinned here because it is a security boundary and a silent
+    # upstream default flip would be invisible in a values diff.
+    requireAuthToken: true
     # Huddle audio is not adopted (spec non-goals). The chart default (null)
     # would advertise it as available on a single-replica release, so pin it.
     huddleAudioAvailable: false
+
+    # ── Retention / data-handling (node N16) ──────────────────────────────
+    # These are prd-grade and apply to BOTH environments on purpose: a privacy
+    # control that is weaker in dev is a control that gets tested in the wrong
+    # configuration. Rationale and sign-off: deploy/PRIVACY-REVIEW.md.
+    #
+    # Ephemeral-channel lifetime ceiling: 7 days (604800 s) of IDLE time — the
+    # deadline resets on every durable message, so an active channel never
+    # expires. Three things this is NOT, all verified in source:
+    #   * NOT a cap. It is an OVERRIDE (crates/buzz-relay/src/config.rs:691-701):
+    #     a channel created asking for 1 h also gets 7 days. It bounds the long
+    #     tail at the cost of lengthening a deliberately-short request. A true
+    #     min(client, org) cap is an upstream contribution candidate.
+    #   * NOT a purge. The reaper sets channels.archived_at
+    #     (crates/buzz-db/src/channel.rs:1387-1401); rows in `events` survive
+    #     and stay FTS-indexed. Deletion is a documented follow-up, not a knob.
+    #   * NOT applicable to permanent channels. Only channels created WITH a TTL
+    #     tag are affected; a normal channel is retained indefinitely.
+    # The relay logs a startup warning naming this value. That is expected.
+    ephemeralTtlOverride: 604800
+    # Media GET requires Blossom kind:24242 auth AND relay membership. The
+    # upstream default is false (staged client rollout). There is no media at
+    # all in phase 0, so this costs nothing now and closes an unauthenticated
+    # read path before N18 turns media on.
+    requireMediaGetAuth: true
+    # Do not persist per-upload records. Already the default; explicit because
+    # the companion knobs would store client IP and port, and turning that on
+    # should require deleting a line that says not to.
+    uploadRecords: false
+
+    # ── extraEnv: READ THIS BEFORE OVERRIDING ─────────────────────────────
+    # Helm MERGES maps but REPLACES lists. An ArgoCD Application that sets
+    # `buzz.relay.extraEnv` replaces this entire list — it does not append to
+    # it. Dropping BUZZ_GIT_CONFORMANCE_PROBE that way makes the relay
+    # startup-FATAL, and dropping the retention block below silently undoes
+    # the privacy controls signed off in deploy/PRIVACY-REVIEW.md.
+    # If you must override, copy the WHOLE list and edit the value you meant.
     extraEnv:
       - name: RUST_LOG
         value: info
@@ -264,6 +305,23 @@ buzz:
       # force-empty BUZZ_S3_ACCESS_KEY/BUZZ_S3_SECRET_KEY).
       - name: BUZZ_GIT_CONFORMANCE_PROBE
         value: "false"
+
+      # ── Retention / data-handling (node N16) ────────────────────────────
+      # The other three privacy controls are first-class subchart values
+      # (relay.ephemeralTtlOverride / requireMediaGetAuth / uploadRecords,
+      # above) — set them THERE, not here: the subchart emits those env vars
+      # itself, so a duplicate entry in this list would rely on
+      # last-duplicate-wins env semantics to have any effect.
+      #
+      # BUZZ_AUDIT_ENABLED has no subchart value, so it can only be pinned
+      # here. The tamper-evident per-community hash-chained audit log is on by
+      # default; pinned because losing it silently would remove the only
+      # append-only record of who published what. It stores structural metadata
+      # only — event kind, channel id, event id, actor pubkey (media adds
+      # sha256/size/mime). No message content
+      # (crates/buzz-relay/src/handlers/event.rs:592).
+      - name: BUZZ_AUDIT_ENABLED
+        value: "true"
 
   # No PVCs: git state is object-store-backed and git-forge is not adopted.
   # emptyDir scratch per pod.
