@@ -145,13 +145,23 @@ void main() {
       expect(resolved.dark, generateColorScheme(findTheme('github-dark')!));
     });
 
-    test('dark mode falls back to a dark theme when the pick is unpaired', () {
+    test('dark mode falls back to the default pair when pick is unpaired', () {
       // 'snazzy-light' is light and has no dark counterpart.
       final resolved = resolveSchemes('snazzy-light', ThemeMode.dark);
 
       expect(resolved.forcedMode, ThemeMode.dark);
       expect(resolved.dark.brightness, Brightness.dark);
-      expect(resolved.dark, generateColorScheme(themeGroups().dark.first));
+      expect(resolved.darkTheme?.name, buzzDarkThemeName);
+      expect(resolved.dark, generateColorScheme(findTheme(buzzDarkThemeName)!));
+    });
+
+    test('light mode falls back to the default pair when pick is unpaired', () {
+      final resolved = resolveSchemes('andromeeda', ThemeMode.light);
+
+      expect(resolved.forcedMode, ThemeMode.light);
+      expect(resolved.light.brightness, Brightness.light);
+      expect(resolved.lightTheme?.name, buzzThemeName);
+      expect(resolved.light, generateColorScheme(findTheme(buzzThemeName)!));
     });
 
     test('an unknown scheme name falls back to the default theme', () {

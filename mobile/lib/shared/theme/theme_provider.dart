@@ -218,6 +218,22 @@ ThemeColors _themeForBrightness(
   final paired = pairName == null ? null : findTheme(pairName);
   if (paired != null && paired.isDark == wantDark) return paired;
 
+  // Match desktop's paired-first picker ordering: an unpaired selection falls
+  // back through the first-party default pair, not whichever borrowed theme
+  // sorts first in the full brightness group.
+  final defaultTheme = findTheme(defaultSchemeName);
+  if (defaultTheme != null) {
+    if (defaultTheme.isDark == wantDark) return defaultTheme;
+
+    final defaultPairName = themePairFor(defaultTheme.name);
+    final defaultPair = defaultPairName == null
+        ? null
+        : findTheme(defaultPairName);
+    if (defaultPair != null && defaultPair.isDark == wantDark) {
+      return defaultPair;
+    }
+  }
+
   final groups = themeGroups();
   final fallback = wantDark ? groups.dark : groups.light;
   return fallback.isEmpty ? selected : fallback.first;
