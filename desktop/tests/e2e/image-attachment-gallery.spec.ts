@@ -61,7 +61,7 @@ function imageImetaTag({
 }
 
 async function installNoDimImageRoutes(page: Page) {
-  await page.route("https://example.com/e2e/gallery-*.png", (route) => {
+  await page.route("https://example.com/e2e/gallery-*.png*", (route) => {
     const requestedUrl = route.request().url();
     const isPortrait = requestedUrl.includes("portrait");
     const isSecond = requestedUrl.includes("second");
@@ -321,6 +321,15 @@ test("hidden spoiler images are excluded from gallery navigation until revealed"
   await expect(spoiler).toHaveAttribute("data-revealed", "false");
   await spoiler.click();
   await expect(spoiler).toHaveAttribute("data-revealed", "true");
+
+  // Gallery discovery excludes opacity-zero media. The revealed attribute
+  // commits before the spoiler's CSS reveal transition finishes, so wait for
+  // the trigger and image to become visually eligible before reopening.
+  const revealedTrigger = row.locator(
+    `[data-image-lightbox-trigger]:has(img[src*="${SPOILER_HIDDEN_SHA}"])`,
+  );
+  await expect(revealedTrigger).toHaveCSS("opacity", "1");
+  await expect(revealedTrigger.locator("img")).toHaveCSS("opacity", "1");
 
   await row.locator(`img[src*="${SPOILER_VISIBLE_SHA}"]`).click();
   await expect(dialog).toBeVisible();
@@ -600,6 +609,22 @@ test("multi-image mosaics keep a fixed width and grow by rows", async ({
       "data-image-mosaic-count",
       String(count),
     );
+    await row.scrollIntoViewIfNeeded();
+    const images = mosaic.locator("img");
+    await expect(images).toHaveCount(count);
+    await expect
+      .poll(() =>
+        images.evaluateAll((elements) =>
+          elements.every(
+            (element) =>
+              element instanceof HTMLImageElement &&
+              element.complete &&
+              element.naturalWidth > 0,
+          ),
+        ),
+      )
+      .toBe(true);
+    await expect(mosaic).toBeVisible();
     const box = await mosaic.boundingBox();
     if (!box) throw new Error(`Expected ${count}-image mosaic layout box`);
     mosaics.push({ count, height: box.height, width: box.width });
