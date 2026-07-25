@@ -77,7 +77,22 @@ final accentProvider = NotifierProvider<AccentNotifier, int>(
 class SchemeNotifier extends Notifier<String?> {
   @override
   String? build() {
-    return ref.read(savedPrefsProvider).getString(_schemeKey);
+    final prefs = ref.read(savedPrefsProvider);
+    final stored = prefs.getString(_schemeKey);
+    final compatible = schemeForAppearanceMode(
+      stored,
+      ref.watch(themeProvider),
+    );
+
+    if (compatible != stored) {
+      if (compatible == null) {
+        prefs.remove(_schemeKey);
+      } else {
+        prefs.setString(_schemeKey, compatible);
+      }
+    }
+
+    return compatible;
   }
 
   void setScheme(String? name) {

@@ -107,22 +107,54 @@ class _SetStatusSheet extends HookConsumerWidget {
           // there is no separate row of emoji suggestions below.
           Row(
             children: [
-              Semantics(
-                button: true,
-                label: 'Choose a status emoji',
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(Radii.lg),
-                  onTap: () => showEmojiPicker(
-                    context: context,
-                    onSelect: (value) => emoji.value = value,
-                  ),
-                  child: SizedBox.square(
-                    dimension: _emojiWellSize,
-                    child: Center(
-                      child: _StatusEmojiPreview(emoji: emoji.value),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Semantics(
+                    button: true,
+                    label: 'Choose a status emoji',
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(Radii.lg),
+                      onTap: () => showEmojiPicker(
+                        context: context,
+                        onSelect: (value) => emoji.value = value,
+                      ),
+                      child: SizedBox.square(
+                        dimension: _emojiWellSize,
+                        child: Center(
+                          child: _StatusEmojiPreview(emoji: emoji.value),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  if (emoji.value.isNotEmpty)
+                    Positioned(
+                      top: -Grid.quarter,
+                      right: -Grid.quarter,
+                      child: SizedBox.square(
+                        dimension: Grid.sm,
+                        child: IconButton(
+                          onPressed: isSaving.value
+                              ? null
+                              : () => emoji.value = '',
+                          tooltip: 'Remove status emoji',
+                          visualDensity: VisualDensity.compact,
+                          style: IconButton.styleFrom(
+                            backgroundColor: context.colors.surface,
+                            minimumSize: const Size.square(Grid.sm),
+                            maximumSize: const Size.square(Grid.sm),
+                            padding: EdgeInsets.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          icon: Icon(
+                            LucideIcons.x,
+                            size: 14,
+                            color: context.colors.onSurface,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(width: Grid.half),
               Expanded(

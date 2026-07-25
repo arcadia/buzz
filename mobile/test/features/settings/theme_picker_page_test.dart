@@ -58,6 +58,24 @@ void main() {
       expect(find.text('No themes found'), findsOneWidget);
     });
 
+    testWidgets('system mode normalizes a stored unpaired theme', (
+      tester,
+    ) async {
+      final instance = await _prefs({'buzz_color_scheme': 'snazzy-light'});
+      await tester.pumpWidget(
+        WidgetHelpers.testable(
+          child: const ThemePickerPage(),
+          overrides: [savedPrefsProvider.overrideWithValue(instance)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        instance.getString('buzz_color_scheme'),
+        themeGroups().paired.first.name,
+      );
+    });
+
     testWidgets('light mode lists light themes by their full name', (
       tester,
     ) async {
