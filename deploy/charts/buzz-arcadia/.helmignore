@@ -1,0 +1,7 @@
+.DS_Store
+.git/
+.gitignore
+.idea/
+.vscode/
+# Rendering fixtures are repo artifacts, not chart payload.
+ci/

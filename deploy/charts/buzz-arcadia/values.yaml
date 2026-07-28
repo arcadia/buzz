@@ -1,0 +1,362 @@
+# buzz-arcadia — default values.
+#
+# Per-environment overrides come from the ArgoCD Application's inline
+# `helm.values` in cloud-config-infrastructures (branch `ai-dev` for dev-ai,
+# branch `ai` for prd-ai). ci/dev-ai-values.yaml and ci/prd-ai-values.yaml in
+# this chart are the rendering fixtures for those two environments and are the
+# reference for what the Applications must carry.
+#
+# TWO VALUE TIERS, do not mix them up:
+#   * parent level (this file's top-level keys) — Arcadia-side wiring: the nine
+#     injected cluster globals, ESO, RDS, Redis, ingress, NetworkPolicy.
+#   * `buzz:` subtree — the vendored upstream chart. Helm passes ONLY
+#     `.Values.buzz` to the subchart, so a relay value written flat at the top
+#     level is silently ignored and the subchart hard-fails
+#     (`charts/buzz/templates/_validate.tpl:9-11`, "relayUrl is required").
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Injected cluster globals ─────────────────────────────────────────────────
+# The nine parameters the cluster's global-helm-values-patch.yaml appends to
+# every Application as parent-level `spec.source.helm.parameters`
+# (cloud-config-infrastructures preprd/dev-ai/global-helm-values-patch.yaml).
+# Left empty here on purpose: an empty value must fail the render, never
+# silently deploy into the wrong account.
+#
+# Helm cannot copy these into the `buzz:` subtree — parent values.yaml is plain
+# YAML and a parent template cannot mutate a subchart's values (subchart
+# templates render first). So the wrapper consumes them in the resources IT
+# renders (ingress annotations, RDS claim, Redis image, ESO key paths) and
+# *enforces* the composed relay image repository against the value the
+# Application supplies — see relayImage.enforceComposedRepository below.
+account: ""              # 258174056699 (dev-ai) | 572630832277 (prd-ai)
+region: "us-east-1"
+clusterName: ""          # dev-ai | prd-ai
+clusterEndpoint: ""      # unused by this chart; accepted so the global patch applies cleanly
+infrastructure: ""       # SSM path segment: ai-dev | ai
+oidcProviderId: ""       # unused in phase 0 (no IRSA until N18 media/S3)
+argocdNamespace: "argocd"  # unused by this chart; accepted from the global patch
+domainCertArn: ""        # ACM wildcard cert for *.<domainHostedZone>
+domainHostedZone: ""     # ai-dev.arcadiaanalytics.com | ai.arcadiaanalytics.com
+
+# ── Relay image ──────────────────────────────────────────────────────────────
+# The image itself is pulled by the subchart from `buzz.image.repository`.
+# GHCR is unreachable from the clusters, so the relay is built into each
+# account's own ECR by the fork's build-and-push workflow (N1) and pulled
+# in-account (no cross-account pull).
+relayImage:
+  repositoryPath: buzz/relay
+  # Fail the render when `buzz.image.repository` is not
+  # <account>.dkr.ecr.<region>.amazonaws.com/<repositoryPath>. This is the
+  # composition the spec asks the wrapper to own; because Helm cannot inject it
+  # into the subchart, the wrapper enforces it instead — a cross-account or
+  # docker.io image reference fails at template time rather than as an
+  # ImagePullBackOff after sync. Set false only for a deliberate mirror.
+  enforceComposedRepository: true
+
+# ── Ingress (internal ALB, D8) ───────────────────────────────────────────────
+# Rendered by the wrapper (not by the subchart's ingress.yaml, which is kept
+# disabled) so the annotations can be built from the injected globals:
+# domainCertArn -> certificate-arn, domainHostedZone -> host + external-dns.
+ingress:
+  enabled: true
+  className: alb
+  hostPrefix: buzz
+  host: ""                       # default: <hostPrefix>.<domainHostedZone>
+  scheme: internal               # VPN-pinned; never internet-facing
+  targetType: ip
+  listenPorts: '[{"HTTPS":443}]'
+  # Long-lived WebSockets: the default 60 s ALB idle timeout would tear down
+  # every relay connection. 3600 s per D8.
+  idleTimeoutSeconds: 3600
+  externalDnsTtl: "60"
+  # Health check MUST target the health port, not "/" on :3000. The relay binds
+  # a community from the Host header before anything else and 404s an unmapped
+  # host (crates/buzz-relay/src/router.rs:280-298) — an ALB health check sends
+  # the target IP as Host, so "/" on :3000 would mark every target unhealthy.
+  # :8080/_readiness has no host binding and already gates DB + Redis.
+  healthcheckPath: /_readiness
+  successCodes: "200"
+  extraAnnotations: {}
+
+# ── Secrets: ESO ExternalSecret -> buzz.secrets.existingSecret ───────────────
+# One relay-tier ExternalSecret. The bridge's agent private keys live in a
+# SEPARATE ExternalSecret in the bridge chart (aria-frontend
+# deploy/k8s/aria-buzz-bridge, decision D12) so relay pods never mount agent
+# keys and vice versa.
+#
+# `data` maps target Secret key -> SSM path tail. Full path is
+# /<infrastructure>/<clusterName>/<tail>, e.g.
+# /ai-dev/dev-ai/buzz/relay-private-key. Every param must exist before the
+# Application syncs — one missing param fails the whole ExternalSecret for all
+# pods (pre-flight runbook: N6).
+#
+# NOT in SSM (composed in the target template below, from the Crossplane
+# connection Secret and the Redis password): DATABASE_URL, REDIS_URL.
+# NOT here at all: S3 keys (none in phase 0, IRSA at N18) and LiteLLM keys
+# (fetched at runtime per enrolled human by the bridge).
+externalSecret:
+  enabled: true
+  refreshInterval: 1h
+  targetName: buzz-secrets
+  secretStore:
+    name: ssm-clustersecretstore   # verified live on dev-ai and prd-ai
+    kind: ClusterSecretStore
+  ssmPathPrefix: ""                # default: /<infrastructure>/<clusterName>
+  data:
+    BUZZ_RELAY_PRIVATE_KEY: buzz/relay-private-key
+    BUZZ_GIT_HOOK_HMAC_SECRET: buzz/git-hook-hmac
+    REDIS_PASSWORD: buzz/redis-password
+
+# ── DATABASE_URL composition (decision O3) ──────────────────────────────────
+# Crossplane writes username/password/endpoint to the connection Secret
+# {namespace}-{clusterName}-{claimName}-connection — it never emits a URL, and
+# the endpoint does not exist until the same sync provisions the instance, so a
+# `database-url` SSM param is impossible. The wrapper stands up a namespaced ESO
+# SecretStore (Kubernetes provider) that reads exactly that one Secret, and the
+# relay ExternalSecret composes DATABASE_URL from it in its target template.
+database:
+  # sslmode appended to DATABASE_URL. `require` encrypts without pinning a CA
+  # bundle into the relay image; empty string omits the parameter entirely.
+  sslMode: require
+  connectionSecret:
+    name: ""                       # default: {ns}-{clusterName}-{rds.claimName}-connection
+    usernameKey: username
+    passwordKey: password
+    # The RDS endpoint value works with or without a :port suffix — the URL
+    # deliberately does not append one, and Postgres defaults to 5432 (the port
+    # the claim asks for).
+    endpointKey: endpoint
+  secretStore:
+    name: buzz-crossplane-connection
+    serviceAccountName: buzz-crossplane-reader
+    # Least privilege: the Role names the single connection Secret. If ESO's
+    # store validation (SelfSubjectRulesReview) rejects a resourceNames-scoped
+    # rule, flip this to false to grant namespace-wide secret reads instead.
+    restrictToConnectionSecret: true
+    server:
+      url: ""                      # empty -> ESO uses the in-cluster API server
+      caProvider:
+        enabled: true
+        type: ConfigMap
+        name: kube-root-ca.crt
+        key: ca.crt
+
+# ── Postgres: Crossplane RDS claim (D5) ─────────────────────────────────────
+# Non-burstable class on purpose: the litellm-internal RCA recorded in
+# cloud-config-infrastructures (db.t3.medium at CPUCreditBalance=0 -> readiness
+# flaps -> ALB 460s) applies verbatim to a relay whose readiness pings the DB.
+# dev-ai runs m6g (no r6g spend), prd-ai runs r6g multi-AZ.
+rds:
+  enabled: true
+  claimName: buzz-db               # claim object name is <clusterName>-<claimName>
+  dbName: buzz
+  # A chart uninstall or a Git removal must never delete the database.
+  deletionPolicy: Orphan
+  dbInstanceClass: db.m6g.large
+  engineVersion: "17.4"
+  allocatedStorage: 50
+  storageType: gp3
+  multiAZ: false
+  masterUsername: postgres
+  deletionProtection: true
+  skipFinalSnapshot: false
+  preferredBackupWindow: "02:00-03:00"
+  preferredMaintenanceWindow: "sun:03:00-sun:04:00"
+  # Arcadia claim tags — all required by the composition.
+  jiraTicketNumber: ""
+  risk: medium
+  team: sre
+  terminateafter: "never"
+  providerConfigRefName: provider-aws
+  # Environment-specific, no safe default — supplied per env (see ci/ fixtures).
+  subnetIds: []
+  cidrBlocks: []
+
+# ── Redis (decision O4) ─────────────────────────────────────────────────────
+# Single in-cluster pod, litellm-module shape, ECR-mirrored Chainguard image
+# (the clusters cannot pull docker.io). buzz consumes ONE redis_url and has no
+# Sentinel support, so litellm's `redis.ha.enabled: true` Sentinel pattern is
+# not consumable here.
+#
+# ACCEPTED SPOF, both environments: relay readiness pings Redis
+# (crates/buzz-relay/src/router.rs:352-384), so a Redis restart flips every
+# relay replica NotReady at once. prd ElastiCache is the tracked direction
+# (SRE-4216/17/18) and is a FOLLOW-UP TICKET, not a phase-0 blocker.
+redis:
+  enabled: true
+  port: 6379
+  image:
+    repositoryPath: cgr.dev/arcadia.io/redis
+    tag: v8.6.0                    # same mirrored tag litellm-internal runs
+  maxmemory: "256mb"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  nodeSelector: {}
+  tolerations: []
+
+# ── NetworkPolicy ───────────────────────────────────────────────────────────
+# allowedIngressCidrs are the REAL per-env VPC CIDRs (dev-ai 10.54.0.0/17 +
+# 10.54.128.0/17, prd-ai 10.52.0.0/17 + 10.52.128.0/17) — they cover both the
+# ALB ENIs and pod IPs (VPC CNI hands pods VPC addresses). 10.0.0.0/8 is
+# rejected by the render guard: it is not a boundary.
+networkPolicy:
+  enabled: true
+  allowedIngressCidrs: []
+  # Relay ports reachable from the VPC: 3000 app (ALB), 8080 health (ALB health
+  # check), 9102 metrics (Alloy scrape, N14).
+  relayPorts:
+    - 3000
+    - 8080
+    - 9102
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Vendored upstream chart (deploy/charts/buzz). Everything below is passed to
+# the subchart verbatim.
+# ═════════════════════════════════════════════════════════════════════════════
+buzz:
+  # Public wss:// URL — drives RELAY_URL, the community host binding, the
+  # NIP-42 relay tag the bridge must reproduce, and mediaBaseUrl.
+  relayUrl: ""
+  # 64-char lowercase hex pubkey of the relay operator (provisioned by N6's
+  # `buzz-admin generate-key`). Required while requireRelayMembership=true.
+  ownerPubkey: ""
+
+  image:
+    # MUST equal <account>.dkr.ecr.<region>.amazonaws.com/buzz/relay — enforced
+    # by templates/_validate.tpl. Placeholder (not "") because the subchart
+    # schema requires a non-empty string and would otherwise fail with a
+    # confusing JSON-schema error instead of the guard's message.
+    # NOTE: there is no `image.registry` key — the subchart schema sets
+    # image.additionalProperties=false, so an extra key fails validation.
+    repository: "SET-buzz.image.repository-FROM-THE-ARGOCD-APPLICATION"
+    # Explicit tag, always. An empty tag silently falls back to the chart's
+    # appVersion ("0.1.0"), which is not a tag the ECR repo publishes.
+    tag: "SET-buzz.image.tag-FROM-THE-ARGOCD-APPLICATION"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  # GitOps-mandatory: without existingSecret the subchart's own Secret path uses
+  # `lookup` + `randAlphaNum`, which under `helm template` (Argo) regenerates the
+  # relay identity on every sync. Must match externalSecret.targetName.
+  secrets:
+    existingSecret: buzz-secrets
+
+  relay:
+    requireRelayMembership: true
+    # REST API requests must carry token auth. This is already the subchart
+    # default, pinned here because it is a security boundary and a silent
+    # upstream default flip would be invisible in a values diff.
+    requireAuthToken: true
+    # Huddle audio is not adopted (spec non-goals). The chart default (null)
+    # would advertise it as available on a single-replica release, so pin it.
+    huddleAudioAvailable: false
+
+    # ── Retention / data-handling (node N16) ──────────────────────────────
+    # These are prd-grade and apply to BOTH environments on purpose: a privacy
+    # control that is weaker in dev is a control that gets tested in the wrong
+    # configuration. Rationale and sign-off: deploy/PRIVACY-REVIEW.md.
+    #
+    # Ephemeral-channel lifetime ceiling: 7 days (604800 s) of IDLE time — the
+    # deadline resets on every durable message, so an active channel never
+    # expires. Three things this is NOT, all verified in source:
+    #   * NOT a cap. It is an OVERRIDE (crates/buzz-relay/src/config.rs:691-701):
+    #     a channel created asking for 1 h also gets 7 days. It bounds the long
+    #     tail at the cost of lengthening a deliberately-short request. A true
+    #     min(client, org) cap is an upstream contribution candidate.
+    #   * NOT a purge. The reaper sets channels.archived_at
+    #     (crates/buzz-db/src/channel.rs:1387-1401); rows in `events` survive
+    #     and stay FTS-indexed. Deletion is a documented follow-up, not a knob.
+    #   * NOT applicable to permanent channels. Only channels created WITH a TTL
+    #     tag are affected; a normal channel is retained indefinitely.
+    # The relay logs a startup warning naming this value. That is expected.
+    ephemeralTtlOverride: 604800
+    # Media GET requires Blossom kind:24242 auth AND relay membership. The
+    # upstream default is false (staged client rollout). There is no media at
+    # all in phase 0, so this costs nothing now and closes an unauthenticated
+    # read path before N18 turns media on.
+    requireMediaGetAuth: true
+    # Do not persist per-upload records. Already the default; explicit because
+    # the companion knobs would store client IP and port, and turning that on
+    # should require deleting a line that says not to.
+    uploadRecords: false
+
+    # ── extraEnv: READ THIS BEFORE OVERRIDING ─────────────────────────────
+    # Helm MERGES maps but REPLACES lists. An ArgoCD Application that sets
+    # `buzz.relay.extraEnv` replaces this entire list — it does not append to
+    # it. Dropping BUZZ_GIT_CONFORMANCE_PROBE that way makes the relay
+    # startup-FATAL, and dropping the retention block below silently undoes
+    # the privacy controls signed off in deploy/PRIVACY-REVIEW.md.
+    # If you must override, copy the WHOLE list and edit the value you meant.
+    extraEnv:
+      - name: RUST_LOG
+        value: info
+      # S3/media is out of phase 0. The A3 git-on-object-storage conformance
+      # probe is startup-FATAL and env-gated (crates/buzz-relay/src/main.rs:469);
+      # "false" is the only string that disables it. No S3 claim, endpoint, or
+      # credentials exist until N18 (which brings a Bucket claim + IRSA and
+      # force-empty BUZZ_S3_ACCESS_KEY/BUZZ_S3_SECRET_KEY).
+      - name: BUZZ_GIT_CONFORMANCE_PROBE
+        value: "false"
+
+      # ── Retention / data-handling (node N16) ────────────────────────────
+      # The other three privacy controls are first-class subchart values
+      # (relay.ephemeralTtlOverride / requireMediaGetAuth / uploadRecords,
+      # above) — set them THERE, not here: the subchart emits those env vars
+      # itself, so a duplicate entry in this list would rely on
+      # last-duplicate-wins env semantics to have any effect.
+      #
+      # BUZZ_AUDIT_ENABLED has no subchart value, so it can only be pinned
+      # here. The tamper-evident per-community hash-chained audit log is on by
+      # default; pinned because losing it silently would remove the only
+      # append-only record of who published what. It stores structural metadata
+      # only — event kind, channel id, event id, actor pubkey (media adds
+      # sha256/size/mime). No message content
+      # (crates/buzz-relay/src/handlers/event.rs:592).
+      - name: BUZZ_AUDIT_ENABLED
+        value: "true"
+
+  # No PVCs: git state is object-store-backed and git-forge is not adopted.
+  # emptyDir scratch per pod.
+  persistence:
+    git:
+      enabled: false
+
+  # Ingress is rendered by the wrapper (templates/ingress.yaml) so the ALB
+  # annotations can consume domainCertArn / domainHostedZone.
+  ingress:
+    enabled: false
+
+  # Bundled eval-only services: the cloudpirates dependencies are REMOVED from
+  # the vendored chart, so enabling either renders nothing and breaks the relay.
+  # Guarded in templates/_validate.tpl.
+  postgresql:
+    enabled: false
+  redis:
+    enabled: false
+  minio:
+    enabled: false
+
+  # No Prometheus Operator / ServiceMonitor CRDs exist on either cluster;
+  # scraping is Alloy River config in cloud-config-templates (N14).
+  serviceMonitor:
+    enabled: false
+
+  # Advisory-lock-guarded sqlx migrations at relay startup; safe at >1 replica.
+  # The separate preUpgradeJob is a no-op upstream.
+  migrate:
+    autoMigrate: true
+
+  autoscaling:
+    enabled: false
+
+  # NIP-AB device pairing is not adopted.
+  pairingRelay:
+    enabled: false

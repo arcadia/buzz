@@ -1,0 +1,69 @@
+# prd-ai rendering fixture (account 572630832277, cluster prd-ai).
+#
+# Reference for prd/ai/buzz/application.yaml on cloud-config-infrastructures
+# branch `ai` (sync-wave 70, N15). Promotion to prd is gated: AIFM ticket +
+# approved ACM CR/SCR before merge, deployer != implementer, SRE review — and
+# the phase-2 gates G1–G4 (soak, PHI review, sandbox decision). The image tag is
+# pinned by hand in that PR; no CI job writes the prd branch.
+#
+# ⚑ SRE inputs still required here: the RDS jiraTicketNumber, and confirmation
+# of the prd Redis decision (O4 — in-cluster single pod is accepted for now,
+# ElastiCache is the tracked follow-up).
+#
+# ── injected globals (global-helm-values-patch.yaml, do NOT copy into the app)
+account: "572630832277"
+region: "us-east-1"
+clusterName: "prd-ai"
+clusterEndpoint: "https://F25388A1AC43D6CEB6EDCC57456B8215.gr7.us-east-1.eks.amazonaws.com"
+infrastructure: "ai"
+oidcProviderId: "F25388A1AC43D6CEB6EDCC57456B8215"
+argocdNamespace: "argocd"
+domainCertArn: "arn:aws:acm:us-east-1:572630832277:certificate/d8cb3f0c-9ca9-424d-b2d8-4d2b1955543f"
+domainHostedZone: "ai.arcadiaanalytics.com"
+
+# ── everything below IS the Application's helm.values ────────────────────────
+rds:
+  claimName: buzz-db
+  dbName: buzz
+  dbInstanceClass: db.r6g.large
+  multiAZ: true
+  deletionProtection: true
+  skipFinalSnapshot: false
+  subnetIds:
+    - subnet-037cfc7c119bdcff2
+    - subnet-09c641cd86e3c7e32
+    - subnet-081b52b0e4afb2f54
+  cidrBlocks:
+    - 10.52.0.0/17
+    - 10.52.128.0/17
+  jiraTicketNumber: ""
+
+networkPolicy:
+  allowedIngressCidrs:
+    - 10.52.0.0/17
+    - 10.52.128.0/17
+
+buzz:
+  relayUrl: "wss://buzz.ai.arcadiaanalytics.com"
+  ownerPubkey: "0000000000000000000000000000000000000000000000000000000000000000"
+  # 2 replicas require BUZZ_GIT_HOOK_HMAC_SECRET (provisioned in SSM by N6) and
+  # turn huddle audio off automatically; buzz-pubsub fan-out is via Redis.
+  replicaCount: 2
+  image:
+    repository: "572630832277.dkr.ecr.us-east-1.amazonaws.com/buzz/relay"
+    tag: "main-0000000000"
+
+  # Retention / data-handling (node N16) is DELIBERATELY NOT overridden here.
+  # The chart's `buzz.relay.extraEnv` defaults are already prd-grade
+  # (BUZZ_EPHEMERAL_TTL_OVERRIDE=604800, BUZZ_AUDIT_ENABLED=true,
+  # BUZZ_REQUIRE_MEDIA_GET_AUTH=true, BUZZ_MEDIA_UPLOAD_RECORDS=false) and they
+  # render into this environment unchanged — verify with:
+  #
+  #   helm template buzz deploy/charts/buzz-arcadia -n buzz \
+  #     -f deploy/charts/buzz-arcadia/ci/prd-ai-values.yaml | grep -A1 BUZZ_EPHEMERAL_TTL
+  #
+  # Helm REPLACES lists rather than merging them, so setting `relay.extraEnv`
+  # here would drop every default in one go — including the startup-FATAL
+  # BUZZ_GIT_CONFORMANCE_PROBE=false and the controls signed off in
+  # deploy/PRIVACY-REVIEW.md. If prd ever needs a different value, copy the
+  # WHOLE list out of values.yaml and change the one entry.

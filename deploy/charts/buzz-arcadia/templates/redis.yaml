@@ -1,0 +1,118 @@
+{{- include "buzz-arcadia.validate" . -}}
+{{- if .Values.redis.enabled }}
+# In-cluster Redis for buzz-pubsub (decision O4), shaped after the litellm
+# module's redis Deployment: single pod, ECR-mirrored Chainguard image, password
+# from the ESO Secret, emptyDir data dir.
+#
+# ACCEPTED SPOF in BOTH environments for now: the relay's /_readiness pings
+# Redis, so a Redis restart flips every relay replica NotReady at once. buzz
+# consumes a single redis_url and has no Sentinel support, so litellm's
+# redis.ha.enabled Sentinel pattern is not consumable here. prd ElastiCache is
+# a tracked follow-up (SRE-4216/17/18 direction), not a phase-0 blocker.
+#
+# REDIS_URL is composed from this Service name + the SSM password in the
+# ExternalSecret target template — the relay reads it from the Secret as
+# REDIS_URL (crates/buzz-relay/src/config.rs:419).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "buzz-arcadia.redisFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buzz-arcadia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "buzz-arcadia.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "buzz-arcadia.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: {{ include "buzz-arcadia.redisImage" . | quote }}
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redis.port }}
+              protocol: TCP
+          command: ["redis-server"]
+          args:
+            - "--requirepass"
+            - "$(REDIS_PASSWORD)"
+            - "--maxmemory"
+            - {{ .Values.redis.maxmemory | quote }}
+            - "--maxmemory-policy"
+            - "allkeys-lru"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecret.targetName }}
+                  key: REDIS_PASSWORD
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- with .Values.redis.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.redis.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "buzz-arcadia.redisFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buzz-arcadia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.redis.port }}
+      targetPort: redis
+      protocol: TCP
+      name: redis
+  selector:
+    {{- include "buzz-arcadia.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+{{- end }}

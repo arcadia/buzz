@@ -1,0 +1,89 @@
+{{- include "buzz-arcadia.validate" . -}}
+{{- if .Values.externalSecret.enabled }}
+{{- $store := .Values.database.secretStore -}}
+# DATABASE_URL composition, decision O3.
+#
+# Crossplane writes username/password/endpoint into the RDS claim's connection
+# Secret ({ns}-{clusterName}-{claimName}-connection) and never emits a URL; the
+# endpoint does not exist until the claim provisions, so a `database-url` SSM
+# parameter cannot be created out of band. This file stands up the read path —
+# a ServiceAccount scoped to that one Secret and an ESO SecretStore using the
+# Kubernetes provider — and templates/externalsecret.yaml composes the URL into
+# the relay Secret from it.
+#
+# First sync ordering: the connection Secret does not exist until Crossplane has
+# provisioned the instance, so the ExternalSecret reports SecretSyncedError and
+# the relay Pods crash-loop for that window. That is expected and self-healing;
+# do not add helm --wait semantics or a blocking sync-wave around the claim.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $store.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buzz-arcadia.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $store.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buzz-arcadia.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    {{- if $store.restrictToConnectionSecret }}
+    resourceNames:
+      - {{ include "buzz-arcadia.rdsConnectionSecretName" . }}
+    {{- end }}
+    verbs: ["get", "list", "watch"]
+  # ESO validates a Kubernetes-provider store by asking the API server what the
+  # impersonated ServiceAccount may do.
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectrulesreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $store.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buzz-arcadia.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $store.serviceAccountName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $store.serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: {{ $store.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buzz-arcadia.labels" . | nindent 4 }}
+spec:
+  provider:
+    kubernetes:
+      remoteNamespace: {{ .Release.Namespace }}
+      server:
+        {{- if $store.server.url }}
+        url: {{ $store.server.url | quote }}
+        {{- end }}
+        {{- if $store.server.caProvider.enabled }}
+        caProvider:
+          type: {{ $store.server.caProvider.type }}
+          name: {{ $store.server.caProvider.name }}
+          key: {{ $store.server.caProvider.key }}
+          namespace: {{ .Release.Namespace }}
+        {{- end }}
+      auth:
+        serviceAccount:
+          name: {{ $store.serviceAccountName }}
+          namespace: {{ .Release.Namespace }}
+{{- end }}
