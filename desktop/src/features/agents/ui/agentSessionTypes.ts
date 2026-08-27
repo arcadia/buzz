@@ -61,6 +61,37 @@ export type AgentActivityDescriptor = {
 /** Observer/ACP wire label for dev-only transcript debugging. */
 export type TranscriptAcpSource = string;
 
+/**
+ * One answer the agent will accept for a permission request, as sent.
+ *
+ * `optionId` is the only value the response may carry back — the harness
+ * comment is emphatic that it must always be looked up by `kind` and never
+ * hardcoded, so it is kept verbatim rather than reconstructed. `kind` is the
+ * ACP vocabulary (`allow_once`, `allow_always`, `reject_once`,
+ * `reject_always`) and is optional because a harness may omit it; `name` is
+ * the label the agent asked us to show.
+ */
+export type PermissionOption = {
+  optionId: string;
+  kind: string | null;
+  name: string;
+};
+
+/**
+ * Everything needed to answer a permission request, kept structured.
+ *
+ * The renderer used to recover the options by string-splitting the item's
+ * display text, which is fine for showing a list and impossible to answer
+ * from: the `optionId`s never survived. `requestId` is the JSON-RPC id the
+ * response must echo, stringified by `jsonRpcId` so a numeric `1` and the
+ * string `"1"` stay distinct.
+ */
+export type PermissionRequestDetails = {
+  requestId: string | null;
+  toolCallId: string | null;
+  options: PermissionOption[];
+};
+
 /** Shared optional identity fields attached during transcript construction. */
 export type TranscriptItemIdentity = {
   turnId?: string | null;
@@ -109,6 +140,8 @@ export type TranscriptItem =
       text: string;
       /** Resolved outcome for permission items (e.g. "Approved (allow_once)", "Denied (reject_once)", "Cancelled"). */
       outcome?: string;
+      /** Structured request payload for permission items, absent otherwise. */
+      permission?: PermissionRequestDetails;
       timestamp: string;
       descriptor?: AgentActivityDescriptor;
       acpSource?: TranscriptAcpSource;

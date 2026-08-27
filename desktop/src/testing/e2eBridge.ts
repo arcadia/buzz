@@ -1056,6 +1056,12 @@ declare global {
     __BUZZ_E2E_SET_RELAY_CONNECTION_STATE__?: (state: ConnectionState) => void;
     __BUZZ_E2E_GET_RELAY_CONNECTION_STATE__?: () => ConnectionState;
     __BUZZ_E2E_SET_STALL_WEBSOCKET_SENDS__?: (stall: boolean) => void;
+    /**
+     * Make the next owner→agent control frame fail to build, so specs can
+     * capture the "your answer did not land" state without waiting out a
+     * websocket timeout.
+     */
+    __BUZZ_E2E_FAIL_OBSERVER_CONTROL__?: (message: string | null) => void;
     __BUZZ_E2E_DISCONNECT_MOCK_WEBSOCKETS__?: () => number;
     __BUZZ_E2E_RESTART_MOCK_WEBSOCKETS__?: () => number;
     __BUZZ_E2E_SET_MESH__?: (mesh: {
@@ -2759,6 +2765,8 @@ const mockReminderEvents: RelayEvent[] = [];
 let mockRelayMembers: RawRelayMember[] = [];
 const mockSockets = new Map<number, MockSocket>();
 let mockWebsocketSendMutexWedged = false;
+/** Set by `__BUZZ_E2E_FAIL_OBSERVER_CONTROL__` to fail control-frame builds. */
+let mockObserverControlError: string | null = null;
 let mockClosedChannelLiveSubscription = false;
 const realSockets = new Map<number, WebSocket>();
 let mockManagedAgents: MockManagedAgent[] = [];
@@ -8863,6 +8871,15 @@ function sendToMockSocket(args: {
       return;
     }
 
+    // Owner → agent control frames (stop turn, switch model, permission
+    // decision). They carry `p` tags rather than a channel tag, so without
+    // this they fell through to the "Missing channel tag." rejection below and
+    // every control publish failed under the mock bridge.
+    if (event.kind === KIND_AGENT_OBSERVER_FRAME) {
+      sendWsText(socket.handler, ["OK", event.id, true, ""]);
+      return;
+    }
+
     if (event.kind === 30078) {
       sendWsText(socket.handler, ["OK", event.id, true, ""]);
       return;
@@ -9181,6 +9198,9 @@ export function maybeInstallE2eTauriMocks() {
     }
   };
 
+  window.__BUZZ_E2E_FAIL_OBSERVER_CONTROL__ = (message) => {
+    mockObserverControlError = message;
+  };
   window.__BUZZ_E2E_SET_STALL_WEBSOCKET_SENDS__ = (stall) => {
     const config = getConfig();
     if (!config?.mock) return;
@@ -10735,6 +10755,32 @@ export function maybeInstallE2eTauriMocks() {
           payload as Parameters<typeof handleGetEvent>[0],
           activeConfig,
         );
+      // Owner → agent control channel. The real command NIP-44 encrypts the
+      // payload to the agent; the mock keeps it readable, because specs assert
+      // the frame from __BUZZ_E2E_COMMAND_PAYLOADS__ and nothing in the app
+      // ever reads a control frame back.
+      case "build_observer_control_event": {
+        if (mockObserverControlError) {
+          const message = mockObserverControlError;
+          mockObserverControlError = null;
+          throw new Error(message);
+        }
+        const control = payload as { agentPubkey: string; payload: unknown };
+        const template = {
+          kind: KIND_AGENT_OBSERVER_FRAME,
+          content: JSON.stringify(control.payload ?? null),
+          tags: [
+            ["p", control.agentPubkey],
+            ["t", "control"],
+          ],
+        };
+        if (identity) {
+          return JSON.stringify(await signWithIdentity(identity, template));
+        }
+        return JSON.stringify(
+          createMockEvent(template.kind, template.content, template.tags),
+        );
+      }
       case "sign_event":
         window.__BUZZ_E2E_SIGNED_EVENTS__?.push({
           content: (payload as { content: string }).content,

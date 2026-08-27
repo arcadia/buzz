@@ -21,7 +21,12 @@ export function LifecycleActivity(props: ActivityRenderClassItemProps) {
 
   if (props.item.renderClass === "permission") {
     return (
-      <PermissionActivity item={props.item} timestampTitle={timestampTitle} />
+      <PermissionActivity
+        agentName={props.agentName}
+        item={props.item}
+        profiles={props.profiles}
+        timestampTitle={timestampTitle}
+      />
     );
   }
 

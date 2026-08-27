@@ -2,6 +2,8 @@ import type {
   AgentActivityDescriptor,
   AgentActivityRenderClass,
   ObserverEvent,
+  PermissionOption,
+  PermissionRequestDetails,
   PromptSection,
   ToolStatus,
   TranscriptItem,
@@ -179,34 +181,40 @@ function describePermissionRequest(payload: Record<string, unknown>) {
     asString(params.reason) ??
     "Permission requested";
   const toolCallId =
-    asString(params.toolCallId) ?? asString(params.tool_call_id);
-  const options = Array.isArray(params.options)
-    ? params.options
-        .map((option) => {
-          const record = asRecord(option);
-          return (
-            asString(record.name) ??
-            asString(record.kind) ??
-            asString(record.optionId)
-          );
-        })
-        .filter((option): option is string => Boolean(option))
+    asString(params.toolCallId) ?? asString(params.tool_call_id) ?? null;
+
+  // Parse the options ONCE into their structured form. The display line, the
+  // outcome-labelling map, and the answer buttons are all projections of this
+  // list — previously the display path kept only the joined names and the
+  // `optionId`s survived nowhere the renderer could reach, which is why the
+  // card could show the choices but never offer them.
+  const structuredOptions: PermissionOption[] = Array.isArray(params.options)
+    ? params.options.flatMap((option) => {
+        const record = asRecord(option);
+        const optionId = asString(record.optionId);
+        const kind = asString(record.kind) ?? null;
+        const name = asString(record.name) ?? kind ?? optionId;
+        // An option with no id cannot be answered with, so it is not an
+        // option — drop it rather than render a button that cannot be sent.
+        if (!optionId || !name) return [];
+        return [{ optionId, kind, name }];
+      })
     : [];
+
+  const options = structuredOptions.map((option) => option.name);
   const detail: string[] = [];
   if (title !== "Permission requested") detail.push(title);
-  if (toolCallId) detail.push(`Tool call: ${toolCallId}`);
+  // The tool-call id used to be printed here as the only way to know which
+  // call was gated. It now rides `permission.toolCallId`, where the renderer
+  // uses it to join to the actual tool row and show the command — so the bare
+  // id is plumbing on screen, and it sat in the middle of the request line.
   if (options.length > 0) detail.push(`Options: ${options.join(", ")}`);
 
-  // Build optionId → kind map for outcome labeling on the response.
+  // optionId → kind, for outcome labeling on the response.
   const optionNames = new Map<string, string>();
-  if (Array.isArray(params.options)) {
-    for (const option of params.options) {
-      const record = asRecord(option);
-      const optionId = asString(record.optionId);
-      const kind = asString(record.kind);
-      if (optionId && kind) {
-        optionNames.set(optionId, kind);
-      }
+  for (const option of structuredOptions) {
+    if (option.kind) {
+      optionNames.set(option.optionId, option.kind);
     }
   }
 
@@ -214,6 +222,8 @@ function describePermissionRequest(payload: Record<string, unknown>) {
     title,
     text: detail.join("\n"),
     optionNames,
+    toolCallId,
+    options: structuredOptions,
     descriptor: {
       renderClass: "permission" as const,
       label: "Permission requested",
@@ -408,6 +418,7 @@ function upsertLifecycleItem(
   ctx: TranscriptItemContext,
   acpSource?: string,
   descriptor?: AgentActivityDescriptor,
+  permission?: PermissionRequestDetails,
 ) {
   const existing = d.itemsById.get(id);
   if (existing?.type === "lifecycle") {
@@ -417,6 +428,7 @@ function upsertLifecycleItem(
       title,
       text: joinLifecycleText(existing.text, text),
       descriptor: descriptor ?? existing.descriptor,
+      permission: permission ?? existing.permission,
       channelId: ctx.channelId,
       turnId: ctx.turnId ?? existing.turnId,
       sessionId: ctx.sessionId ?? existing.sessionId,
@@ -434,6 +446,7 @@ function upsertLifecycleItem(
     text,
     timestamp,
     descriptor,
+    permission,
     channelId: ctx.channelId,
     turnId: ctx.turnId,
     sessionId: ctx.sessionId,
@@ -793,6 +806,10 @@ export function processTranscriptEvent(
     if (method === "session/request_permission") {
       const request = describePermissionRequest(payload);
       const itemId = `permission:${ch}:${event.turnId ?? event.seq}`;
+      // Index by JSON-RPC id so the response (acp_write with result.outcome,
+      // no method) can correlate by id rather than by turn/seq. The same id is
+      // what an answer would have to echo, so the item carries it too.
+      const requestId = jsonRpcId(payload.id);
       upsertLifecycleItem(
         d,
         itemId,
@@ -803,10 +820,12 @@ export function processTranscriptEvent(
         ctx,
         "permission_request",
         request.descriptor,
+        {
+          requestId,
+          toolCallId: request.toolCallId,
+          options: request.options,
+        },
       );
-      // Index by JSON-RPC id so the response (acp_write with result.outcome,
-      // no method) can correlate by id rather than by turn/seq.
-      const requestId = jsonRpcId(payload.id);
       if (requestId) {
         d.pendingPermissions = new Map(d.pendingPermissions);
         d.pendingPermissions.set(requestId, {

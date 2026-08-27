@@ -463,6 +463,7 @@ export function AgentSessionThreadPanel({
         <div ref={contentRef}>
           <ManagedAgentSessionPanel
             agent={agent}
+            canInterruptTurn={canInterruptTurn}
             channelId={sessionChannelId}
             className="border-0 bg-transparent px-0 py-2 shadow-none"
             emptyDescription={
