@@ -1,11 +1,19 @@
-import type { UserProfileLookup } from "@/features/profile/lib/identity";
+import {
+  resolveUserLabel,
+  type UserProfileLookup,
+} from "@/features/profile/lib/identity";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 import { Markdown } from "@/shared/ui/markdown";
 import { useAgentSessionTranscriptVariant } from "../agentSessionTranscriptContext";
 import { formatTranscriptTimestampTitle } from "../agentSessionUtils";
 import type { TranscriptItem } from "../agentSessionTypes";
+import { AgentByline } from "./AgentByline";
 import { ToolActivity } from "./ToolActivity";
 import { TranscriptTimestamp } from "./TranscriptTimestamp";
-import type { ActivityRenderClassItemProps } from "./types";
+import type {
+  ActivityRenderClassItemProps,
+  AgentTranscriptIdentityProps,
+} from "./types";
 import { UserMessageBubble } from "./UserMessageBubble";
 
 export function MessageActivity(props: ActivityRenderClassItemProps) {
@@ -16,13 +24,24 @@ export function MessageActivity(props: ActivityRenderClassItemProps) {
     return null;
   }
 
-  return <MessageItem item={props.item} profiles={props.profiles} />;
+  return (
+    <MessageItem
+      agentAvatarUrl={props.agentAvatarUrl}
+      agentName={props.agentName}
+      agentPubkey={props.agentPubkey}
+      item={props.item}
+      profiles={props.profiles}
+    />
+  );
 }
 
 function MessageItem({
+  agentAvatarUrl,
+  agentName,
+  agentPubkey,
   item,
   profiles,
-}: {
+}: AgentTranscriptIdentityProps & {
   item: Extract<TranscriptItem, { type: "message" }>;
   profiles?: UserProfileLookup;
 }) {
@@ -54,6 +73,14 @@ function MessageItem({
       data-testid="transcript-assistant-message"
     >
       <div className="group relative flex w-full min-w-0 flex-col items-start gap-1">
+        {isCompactPreview ? null : (
+          <AssistantByline
+            agentAvatarUrl={agentAvatarUrl}
+            agentName={agentName}
+            agentPubkey={agentPubkey}
+            profiles={profiles}
+          />
+        )}
         <div
           className={
             isCompactPreview
@@ -69,6 +96,27 @@ function MessageItem({
         </div>
       </div>
     </div>
+  );
+}
+
+function AssistantByline({
+  agentAvatarUrl,
+  agentName,
+  agentPubkey,
+  profiles,
+}: AgentTranscriptIdentityProps & { profiles?: UserProfileLookup }) {
+  const profile = profiles?.[normalizePubkey(agentPubkey)] ?? null;
+  return (
+    <AgentByline
+      avatarUrl={profile?.avatarUrl ?? agentAvatarUrl}
+      displayName={resolveUserLabel({
+        pubkey: agentPubkey,
+        fallbackName: agentName,
+        profiles,
+        preferResolvedSelfLabel: true,
+      })}
+      testId="transcript-assistant-byline"
+    />
   );
 }
 

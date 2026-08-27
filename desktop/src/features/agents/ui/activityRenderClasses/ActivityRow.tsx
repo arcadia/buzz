@@ -3,6 +3,8 @@ import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { useAgentSessionTranscriptVariant } from "../agentSessionTranscriptContext";
+import type { ActivityState } from "../agentActivityState";
+import { ActivityStateMark } from "./ActivityStateMark";
 
 export type ActivityRowLabelParts = {
   verb: string;
@@ -16,10 +18,19 @@ export type ActivityRowStats = {
 
 export type ActivityRowToneScope = "none" | "tool" | "summary";
 
+/**
+ * Every activity row opens with the same gutter, whether or not it has a
+ * state worth reporting, so verbs land on one column down the whole run. The
+ * ragged left edge was most of what made a long transcript hard to scan.
+ */
+const DEFAULT_ROW_STATE: ActivityState = { state: "done", tone: "neutral" };
+
 type ActivityRowProps = {
   children: React.ReactNode;
   className?: string;
   openToneScope?: Exclude<ActivityRowToneScope, "none">;
+  /** Run state and tone for the gutter mark. Defaults to a finished step. */
+  state?: ActivityState;
   testId?: string;
   title?: string;
 };
@@ -39,6 +50,7 @@ export function ActivityRow({
   children,
   className,
   openToneScope = "tool",
+  state = DEFAULT_ROW_STATE,
   testId,
   title,
 }: ActivityRowProps) {
@@ -55,6 +67,7 @@ export function ActivityRow({
         data-testid={testId}
         title={title}
       >
+        <ActivityStateMark state={state} />
         {children}
       </div>
     );
@@ -78,10 +91,14 @@ export function ActivityRow({
             : "group-open:text-foreground",
         )}
       >
+        <ActivityStateMark state={state} />
         {summaryChildren}
         <ChevronDown
           className={cn(
-            "h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover/row:text-foreground",
+            // `ml-auto` parks every disclosure caret on one right-hand column;
+            // trailing carets used to land wherever the label happened to end,
+            // which is most of what made a long run look ragged.
+            "ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform group-hover/row:text-foreground",
             openToneScope === "summary"
               ? "group-open/summary:rotate-180 group-open/summary:text-foreground"
               : "group-open:rotate-180 group-open:text-foreground",
@@ -103,48 +120,59 @@ export function ActivityRow({
 
 export function ActivityRowLabel({
   className,
+  emphasis = "normal",
   object,
   openToneScope,
   stats,
+  testId,
   title,
   verb,
 }: ActivityRowLabelParts & {
   className?: string;
+  testId?: string;
+  /**
+   * `live` pulls a row out of the muted run — used for the step in flight, so
+   * the one thing happening right now is also the one thing that reads dark.
+   * `failed` recolours the verb so a failure never has to be hunted for.
+   */
+  emphasis?: "normal" | "live" | "failed";
   openToneScope: ActivityRowToneScope;
   stats?: ActivityRowStats | null;
   title?: string;
 }) {
   const variant = useAgentSessionTranscriptVariant();
   const isCompactPreview = variant === "compactPreview";
+  const size = isCompactPreview ? "text-xs" : "text-sm";
+  const hover =
+    openToneScope === "none"
+      ? null
+      : openToneScope === "summary"
+        ? "transition-colors group-hover/row:text-foreground group-open/summary:text-foreground"
+        : "transition-colors group-hover/row:text-foreground group-open:text-foreground";
+  // Muted-foreground at full strength clears 4.5:1 on both themes; the old
+  // /50 and /60 washes sat near 2:1 while carrying the row's only content.
+  const verbTone =
+    emphasis === "failed"
+      ? "text-destructive"
+      : emphasis === "live"
+        ? "text-foreground"
+        : "text-muted-foreground";
 
   return (
     <span
       className={cn("inline-flex min-w-0 items-center gap-1.5", className)}
+      data-testid={testId}
       title={title}
     >
-      <span
-        className={cn(
-          "shrink-0 font-semibold text-muted-foreground/50",
-          isCompactPreview ? "text-xs" : "text-sm",
-          openToneScope === "none"
-            ? null
-            : openToneScope === "summary"
-              ? "transition-colors group-hover/row:text-foreground group-open/summary:text-foreground"
-              : "transition-colors group-hover/row:text-foreground group-open:text-foreground",
-        )}
-      >
+      <span className={cn("shrink-0 font-semibold", size, verbTone, hover)}>
         {verb}
       </span>
       {object ? (
         <span
           className={cn(
-            "min-w-0 truncate font-normal text-muted-foreground/60",
-            isCompactPreview ? "text-xs" : "text-sm",
-            openToneScope === "none"
-              ? null
-              : openToneScope === "summary"
-                ? "transition-colors group-hover/row:text-foreground group-open/summary:text-foreground"
-                : "transition-colors group-hover/row:text-foreground group-open:text-foreground",
+            "min-w-0 truncate font-normal text-muted-foreground",
+            size,
+            hover,
           )}
         >
           {object}
@@ -159,6 +187,15 @@ export const ActivityRowContent = (({ children }: ActivityRowContentProps) => (
   <>{children}</>
 )) as ActivityRowContentComponent;
 ActivityRowContent.marker = ACTIVITY_ROW_CONTENT_MARKER;
+
+/**
+ * Indentation for an expanded group's children: a hairline rail plus one
+ * gutter of offset, so a group reads as a group. Without it the children sat
+ * flush with their parent and an expanded burst looked identical to the
+ * top-level run around it.
+ */
+export const ACTIVITY_ROW_NESTED_CLASSNAME =
+  "ml-1.5 border-l border-border/60 pl-3";
 
 function ActivityRowStatsView({ stats }: { stats: ActivityRowStats }) {
   return (

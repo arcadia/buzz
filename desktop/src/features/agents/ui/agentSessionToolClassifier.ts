@@ -160,6 +160,7 @@ function classifyLoadSkillTool(
     label: isSupportingFile ? "Read skill file" : "Read skill",
     preview: skillRef,
     action: { verb: "Read", object },
+    tone: "read",
     source: "harness",
     groupKey: isSupportingFile ? "skill:load-file" : "skill:load",
   };
@@ -177,6 +178,12 @@ function classifyDeveloperHarnessTool(
     if (buzzCli) {
       return buzzCli;
     }
+    // Deliberately toneless: an arbitrary shell command can read or write and
+    // nothing on the wire says which. The timeline's "this changed something"
+    // mark is only worth having if it is never wrong, so an unparsed command
+    // stays neutral rather than being guessed at from its first token. Buzz
+    // CLI invocations are the exception — `parseBuzzCliCommand` above knows
+    // the verb and returns a toned descriptor.
     return {
       renderClass: "shell",
       label: "Ran command",
@@ -194,6 +201,7 @@ function classifyDeveloperHarnessTool(
       label: "Read file",
       preview: path,
       action: { verb: "Read", object: path ?? "file" },
+      tone: "read",
       source: "harness",
       groupKey: "read_file",
     };
@@ -209,6 +217,7 @@ function classifyDeveloperHarnessTool(
         verb: "Viewed",
         object: source ? basenameOrUrl(source) : "image",
       },
+      tone: "read",
       source: "harness",
       groupKey: "view_image",
     };
@@ -221,6 +230,7 @@ function classifyDeveloperHarnessTool(
       label: "Edited file",
       preview: path,
       action: { verb: "Edited", object: path ?? "file" },
+      tone: "write",
       source: "harness",
       groupKey: "file-edit:str_replace",
     };

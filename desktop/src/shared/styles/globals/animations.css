@@ -849,3 +849,58 @@
     animation: none;
   }
 }
+
+/*
+ * Tool-timeline state marks.
+ *
+ * The halo is the only thing on the timeline that moves once a run has
+ * settled, so a reader scanning a long transcript finds the in-flight step
+ * without reading a single command. It expands and fades from the mark rather
+ * than blinking it, so the mark itself stays legible at every frame.
+ */
+.buzz-activity-halo {
+  animation: buzz-activity-halo 1.8s var(--motion-ease-standard) infinite;
+  transform-origin: center;
+}
+
+@keyframes buzz-activity-halo {
+  0% {
+    opacity: 0.5;
+    transform: scale(0.6);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
+/* The awaiting-approval mark breathes instead of expanding: a request that is
+   owed an answer is not progress, and must not borrow the in-flight cue. */
+.buzz-activity-await {
+  animation: buzz-activity-await 2.4s var(--motion-ease-standard) infinite;
+}
+
+@keyframes buzz-activity-await {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .buzz-activity-halo {
+    animation: none;
+    opacity: 0.35;
+    transform: scale(1.6);
+  }
+
+  .buzz-activity-await {
+    animation: none;
+  }
+}
