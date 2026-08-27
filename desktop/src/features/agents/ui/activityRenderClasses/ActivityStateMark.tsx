@@ -2,6 +2,20 @@ import { cn } from "@/shared/lib/cn";
 import { useTranscriptAnimationEnabled } from "../transcriptAnimationPreference";
 import type { ActivityState } from "../agentActivityState";
 
+/**
+ * The animation preference is read here rather than in the mark itself: the
+ * mark renders on every row of the timeline — the app's hottest list — and
+ * only the in-flight row has anything to animate, so the store subscription
+ * belongs to the handful of running rows instead of all sixty.
+ */
+function RunningHalo() {
+  const animationsEnabled = useTranscriptAnimationEnabled();
+  if (!animationsEnabled) return null;
+  return (
+    <span className="buzz-activity-halo absolute size-1.5 rounded-full bg-primary/40" />
+  );
+}
+
 const STATE_TITLE = {
   running: "Running now",
   queued: "Queued",
@@ -34,7 +48,6 @@ export function ActivityStateMark({
   className?: string;
   state: ActivityState;
 }) {
-  const animationsEnabled = useTranscriptAnimationEnabled();
   const changed = state.tone === "write" || state.tone === "admin";
   const toneTitle = TONE_TITLE[state.tone];
   const title = [STATE_TITLE[state.state], toneTitle]
@@ -53,9 +66,7 @@ export function ActivityStateMark({
       data-testid="activity-state-mark"
       title={title}
     >
-      {state.state === "running" && animationsEnabled ? (
-        <span className="buzz-activity-halo absolute size-1.5 rounded-full bg-primary/40" />
-      ) : null}
+      {state.state === "running" ? <RunningHalo /> : null}
       <span
         className={cn(
           "relative rounded-full",
