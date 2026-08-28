@@ -6,9 +6,11 @@ import { cn } from "@/shared/lib/cn";
 import { PubKey } from "@/shared/ui/PubKey";
 import {
   orderPermissionOptions,
+  permissionUnavailableReason,
   viewerIsRequester,
 } from "../agentPermissionDecision";
 import type { TranscriptItem } from "../agentSessionTypes";
+import { useTranscriptAnimationEnabled } from "../transcriptAnimationPreference";
 import { useAgentPermissionDecisionContext } from "../useAgentPermissionDecisions";
 import { ActivityRow, ActivityRowLabel } from "./ActivityRow";
 import {
@@ -96,10 +98,15 @@ export function PermissionActivity({
     toolByItemId,
     viewerPubkey,
   } = useAgentPermissionDecisionContext();
+  // The in-app transcript animation switch, not just prefers-reduced-motion:
+  // the breathing mark is the same class of effect as the running halo, and
+  // turning transcript animation off left this one pulsing.
+  const animationsEnabled = useTranscriptAnimationEnabled();
 
   if (outcome) {
     return (
       <ResolvedPermissionRow
+        fallbackTitle={item.title}
         outcome={outcome}
         requestLines={requestLines}
         timestampTitle={timestampTitle}
@@ -115,6 +122,13 @@ export function PermissionActivity({
   const decision = decisions.get(item.id);
   const options = item.permission?.options ?? [];
   const showButtons = isRequester && canDecide && options.length > 0;
+  // Never an approval demand with no affordance and no reason: silence here is
+  // itself an answer, because the runtime denies a request nobody answers.
+  const unavailableReason = permissionUnavailableReason({
+    canDecide,
+    isRequester,
+    optionCount: options.length,
+  });
   // The request's own words, not the reducer's row label. `item.title` is the
   // constant "Permission requested", which is what the headline above already
   // says — repeating it here pushed the thing being authorized into a
@@ -136,7 +150,10 @@ export function PermissionActivity({
       <div className="flex items-start gap-2">
         <ShieldAlert
           aria-hidden="true"
-          className="buzz-activity-await mt-px size-4 shrink-0"
+          className={cn(
+            "mt-px size-4 shrink-0",
+            animationsEnabled && "buzz-activity-await",
+          )}
         />
         <div className="min-w-0 flex-1">
           <p
@@ -149,12 +166,18 @@ export function PermissionActivity({
             // A display name is forgeable — vanity grinding buys any name — and
             // this row decides who is allowed to authorize execution. The key
             // travels with the name so the reader can tell two "Morgan"s apart.
+            //
+            // In full, per PubKey's own contract for security-decision
+            // surfaces: a truncated key is forgeable by exactly the grinding
+            // this line exists to defeat, so two keys sharing a short prefix
+            // and suffix would render identically and the key would add
+            // nothing over the name it backstops.
             <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1 leading-5 text-muted-foreground">
               <span>Only {requesterLabel} can answer this.</span>
               <PubKey
-                className="text-2xs"
                 pubkey={requesterPubkey}
                 testId="transcript-permission-requester-pubkey"
+                variant="full"
               />
             </p>
           ) : null}
@@ -200,12 +223,18 @@ export function PermissionActivity({
               requestTitle={requestTitle}
             />
           ) : null}
-          {isRequester && !canDecide ? (
+          {unavailableReason ? (
             <p
               className="mt-1.5 leading-5 text-muted-foreground"
               data-testid="transcript-permission-unavailable"
             >
-              Answering from Buzz is not available for this agent yet
+              {unavailableReason === "transport"
+                ? "Answering from Buzz is not available for this agent yet"
+                : // Every option the agent sent arrived without an id, so
+                  // there is nothing that could be answered with. Saying so is
+                  // the difference between a dead control and a known
+                  // limitation the reader can act on.
+                  "This request arrived with no answerable options, so it cannot be answered from here"}
               {stopTurn ? ", but stopping the turn denies the request" : null}.
             </p>
           ) : null}
@@ -228,10 +257,12 @@ export function PermissionActivity({
 }
 
 function ResolvedPermissionRow({
+  fallbackTitle,
   outcome,
   requestLines,
   timestampTitle,
 }: {
+  fallbackTitle: string;
   outcome: string;
   requestLines: string;
   timestampTitle: string | undefined;
@@ -239,6 +270,21 @@ function ResolvedPermissionRow({
   const tone = permissionOutcomeTone(outcome);
   const Icon =
     tone === "approve" ? CheckCircle2 : tone === "deny" ? XCircle : ShieldCheck;
+
+  // This row is the audit trail, so it has to say what was authorized and not
+  // only how it ended. A request whose frame carried no title of its own
+  // contributes no description at all, which left the row reading as a bare
+  // outcome with nothing attached to it.
+  const description = requestLines.trim();
+  // The label renders on one truncating line. Collapsing the description keeps
+  // a second line from landing somewhere the row will never show it, and the
+  // untruncated text stays reachable as the label's tooltip.
+  const object =
+    description
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join(" · ") || fallbackTitle;
 
   return (
     <ActivityRow
@@ -258,9 +304,10 @@ function ResolvedPermissionRow({
         )}
       />
       <ActivityRowLabel
-        object={requestLines || undefined}
+        object={object}
         openToneScope="none"
         testId="transcript-permission-outcome"
+        title={description.includes("\n") ? description : undefined}
         verb={outcome}
       />
     </ActivityRow>

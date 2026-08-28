@@ -6,7 +6,11 @@ import type { CancelManagedAgentTurnResult } from "@/shared/api/types";
  *
  * `requestId` is the JSON-RPC id of the request being answered — the harness
  * needs it to match the parked request, and it is what stops a stale click on
- * a request the agent has already resolved from landing on the next one.
+ * a request the agent has already resolved from landing on the next one. It
+ * keeps the wire type the request arrived with: JSON-RPC allows both a string
+ * and a number, and a string re-encoded as JSON would reach the harness with
+ * literal quotes around it and match nothing.
+ *
  * `optionId` is copied verbatim from the request's own options; it is never
  * reconstructed from a `kind`, because the harness's own comment is emphatic
  * that option ids are not fixed strings.
@@ -15,7 +19,7 @@ import type { CancelManagedAgentTurnResult } from "@/shared/api/types";
  * ratcheted size ceiling.
  */
 export type PermissionDecisionInput = {
-  requestId: string;
+  requestId: string | number;
   optionId: string;
 };
 

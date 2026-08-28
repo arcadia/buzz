@@ -8,8 +8,8 @@ import { installMockBridge, TEST_IDENTITIES } from "../helpers/bridge";
  * that matter for supervision: a long mixed run, a run that failed part-way,
  * and a turn parked on a permission the requester has to answer.
  *
- * The thread panel needs room to open beside the channel, so these run at the
- * width the panel is actually used at (see playwright.aria.config.ts).
+ * The thread panel needs room to open beside the channel, so each spec sets
+ * its own viewport to the width the panel is actually used at.
  */
 const SHOTS = "test-results/tool-timeline";
 

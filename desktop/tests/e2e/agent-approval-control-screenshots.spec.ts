@@ -18,7 +18,14 @@ const OTHER_REQUESTER = TEST_IDENTITIES.alice.pubkey;
 const CHANNEL_ID = "94a444a4-c0a3-5966-ab05-530c6ddc2301"; // #agents
 const THEME_STORAGE_KEY = "buzz-theme";
 const START = Date.now() - 40_000;
-const PERMISSION_RPC_ID = 77;
+/**
+ * A string id on purpose. JSON-RPC allows both, and the numeric case is the
+ * one that survives a JSON round-trip by accident — a fixture pinned to a
+ * number will pass against an implementation that re-encodes the id and ships
+ * `"\"77\""` to the harness, which matches no parked request. This asserts the
+ * raw id reaches the wire.
+ */
+const PERMISSION_RPC_ID = "req-77";
 
 const MANAGED_AGENTS = [
   {
@@ -355,12 +362,39 @@ function resolvedEvents(
   return events;
 }
 
+/**
+ * Mark the turn live in the active-turns store as well as the frame stream.
+ *
+ * A card parked on a permission belongs to a turn that is still running, and
+ * the Stop control is gated on exactly that — `cancelManagedAgentTurn` names
+ * no turn, so offering it against a finished one would interrupt whatever is
+ * running instead. Seeding frames alone leaves the two views of the same turn
+ * disagreeing, which is the fixture lie that would hide that gate breaking.
+ */
+async function seedLiveTurn(page: Page, turnId: string) {
+  await page.evaluate(
+    ({ pubkey, channelId, turn }) => {
+      window.__BUZZ_E2E_SEED_ACTIVE_TURNS__?.({
+        agentPubkey: pubkey,
+        channelId,
+        turnId: turn,
+      });
+    },
+    {
+      pubkey: OBSERVER_AGENT_PUBKEY,
+      channelId: CHANNEL_ID,
+      turn: turnId,
+    },
+  );
+}
+
 async function seedPending(page: Page, requesterPubkey: string) {
   await seedObserverEvents(
     page,
     OBSERVER_AGENT_PUBKEY,
     pendingPermissionEvents(requesterPubkey),
   );
+  await seedLiveTurn(page, "turn-approval");
 }
 
 async function expectPermissionBlock(
@@ -457,7 +491,9 @@ test.describe("agent approval control", () => {
       ).toMatchObject({
         type: "permission_decision",
         channelId: CHANNEL_ID,
-        requestId: JSON.stringify(PERMISSION_RPC_ID),
+        // Verbatim, not JSON-encoded: the harness matches the parked request
+        // on the id it sent.
+        requestId: PERMISSION_RPC_ID,
         optionId: "opt-allow",
       });
       await shoot(panel, `04-sent${suffix}`);

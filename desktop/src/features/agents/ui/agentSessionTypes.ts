@@ -83,11 +83,12 @@ export type PermissionOption = {
  * The renderer used to recover the options by string-splitting the item's
  * display text, which is fine for showing a list and impossible to answer
  * from: the `optionId`s never survived. `requestId` is the JSON-RPC id the
- * response must echo, stringified by `jsonRpcId` so a numeric `1` and the
- * string `"1"` stay distinct.
+ * response must echo, kept in its wire type — the reducer's own collision-free
+ * map key is a separate value and never leaves the reducer, because a
+ * JSON-encoded id would reach the harness wrapped in literal quotes.
  */
 export type PermissionRequestDetails = {
-  requestId: string | null;
+  requestId: string | number | null;
   toolCallId: string | null;
   options: PermissionOption[];
 };

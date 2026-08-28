@@ -37,7 +37,10 @@ export function AgentByline({
       className="size-4 shrink-0 text-3xs"
       displayName={displayName}
       size="sm"
-      testId="transcript-agent-byline-avatar"
+      // Derived from the caller's own id, not a constant: this component
+      // renders once per assistant reply and once per relay send, so a fixed
+      // id resolves to N elements and throws under Playwright strict mode.
+      testId={testId ? `${testId}-avatar` : undefined}
     />
   );
 

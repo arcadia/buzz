@@ -5,7 +5,6 @@ import type {
   TranscriptItem,
 } from "./agentSessionTypes";
 
-type LifecycleItem = Extract<TranscriptItem, { type: "lifecycle" }>;
 type ToolItem = Extract<TranscriptItem, { type: "tool" }>;
 
 /**
@@ -79,20 +78,46 @@ export function orderPermissionOptions(
 }
 
 /**
+ * The channel token the reducer embeds in every transcript item id.
+ *
+ * Ids are built as `<kind>:<channel>:<rest>`, where `<channel>` is the channel
+ * id or the literal "global" for an unscoped frame. Channel ids are UUIDs, so
+ * the second segment is unambiguous.
+ */
+function itemChannelKey(itemId: string): string | null {
+  const start = itemId.indexOf(":");
+  if (start === -1) return null;
+  const end = itemId.indexOf(":", start + 1);
+  if (end === -1) return null;
+  return itemId.slice(start + 1, end);
+}
+
+/**
  * The tool call this request is gating, when the frame names one.
  *
  * The request itself carries only a title and a message. The scope the reader
  * actually needs — the command, the path, the arguments — lives on the tool
  * row the harness already announced under the same `toolCallId`, so we join to
  * it rather than re-deriving anything from the request text.
+ *
+ * Anchored on the permission item's own channel, not just the call id.
+ * Harnesses number tool calls per session (`p3`, `call_1`, `1`), so the same
+ * id exists in every channel, and the unscoped panel holds every channel's
+ * rows at once. An unanchored match handed the first one to the card, putting
+ * another channel's command under "Show the exact command" — the one thing
+ * that block exists to get right.
  */
 export function findPermissionToolItem(
   items: readonly TranscriptItem[],
   toolCallId: string | null | undefined,
+  permissionItemId: string,
 ): ToolItem | null {
   if (!toolCallId) return null;
+  const channelKey = itemChannelKey(permissionItemId);
+  if (!channelKey) return null;
+  const toolItemId = `tool:${channelKey}:${toolCallId}`;
   for (const item of items) {
-    if (item.type === "tool" && item.id.endsWith(`:${toolCallId}`)) {
+    if (item.type === "tool" && item.id === toolItemId) {
       return item;
     }
   }
@@ -125,33 +150,39 @@ export function permissionConsequenceLine(
 }
 
 /**
- * Who asked for the turn this request belongs to.
+ * Turn id → the pubkey of whoever asked for that turn.
  *
  * Per the approval contract only the requester may answer, so the surface has
  * to be able to name them. The pubkey rides the turn's own user message
  * (`From: … hex:` on the prompt frame); there is no separate requester field
  * on the permission frame itself.
  *
- * Falls back to null rather than to the first user message in the transcript —
- * attributing a request to the wrong person on a control that authorizes
- * execution is worse than declining to name anyone.
+ * A turn with no attributed user message is simply absent rather than falling
+ * back to the first user message in the transcript — attributing a request to
+ * the wrong person on a control that authorizes execution is worse than
+ * declining to name anyone.
+ *
+ * Built once per transcript rather than searched per permission row: the
+ * per-row search made requester resolution quadratic over a stream that grows
+ * for as long as the agent runs.
  */
-export function findTurnRequesterPubkey(
+export function buildTurnRequesterIndex(
   items: readonly TranscriptItem[],
-  turnId: string | null | undefined,
-): string | null {
-  if (!turnId) return null;
+): ReadonlyMap<string, string> {
+  const byTurn = new Map<string, string>();
   for (const item of items) {
     if (
-      item.type === "message" &&
-      item.role === "user" &&
-      item.turnId === turnId &&
-      item.authorPubkey
+      item.type !== "message" ||
+      item.role !== "user" ||
+      !item.turnId ||
+      !item.authorPubkey ||
+      byTurn.has(item.turnId)
     ) {
-      return normalizePubkey(item.authorPubkey);
+      continue;
     }
+    byTurn.set(item.turnId, normalizePubkey(item.authorPubkey));
   }
-  return null;
+  return byTurn;
 }
 
 /**
@@ -170,9 +201,57 @@ export function viewerIsRequester(
   return requesterPubkey === normalizePubkey(viewerPubkey);
 }
 
-/** Stable key for one request's in-flight decision state. */
-export function permissionDecisionKey(item: LifecycleItem): string {
-  return item.id;
+/**
+ * Whether the Stop control may be offered on a permission card.
+ *
+ * Stopping is the only way to answer when the buttons cannot be delivered, so
+ * the card carries it — but `cancelManagedAgentTurn` names no turn: it
+ * interrupts whatever the agent is doing *now*. Offering it on a card whose
+ * turn has already ended would therefore kill an unrelated turn, so the gate
+ * is the panel menu's gate exactly, `isWorking && canInterruptTurn`, plus the
+ * channel scope a control frame needs to be addressed at all.
+ */
+export function canStopPermissionTurn({
+  canInterruptTurn,
+  hasChannelScope,
+  isWorking,
+}: {
+  canInterruptTurn: boolean;
+  hasChannelScope: boolean;
+  isWorking: boolean;
+}): boolean {
+  return isWorking && canInterruptTurn && hasChannelScope;
+}
+
+/**
+ * Why the requester is being shown no answer buttons, if they are not.
+ *
+ * Every path that withholds the control has to name its reason. Silence is
+ * itself an answer here — the runtime denies a request nobody answers — so an
+ * approval demand with no affordance and no explanation leaves the reader
+ * with nothing to do and no way to find out why.
+ *
+ * `no-options` is the case where every option the frame offered arrived
+ * without an `optionId` and was dropped as unanswerable. It used to render as
+ * a bare demand: no buttons, no options line, and no unavailable copy either,
+ * because the transport was fine.
+ *
+ * A non-requester needs nothing here — the block already names who the answer
+ * belongs to.
+ */
+export function permissionUnavailableReason({
+  canDecide,
+  isRequester,
+  optionCount,
+}: {
+  canDecide: boolean;
+  isRequester: boolean;
+  optionCount: number;
+}): "transport" | "no-options" | null {
+  if (!isRequester) return null;
+  if (!canDecide) return "transport";
+  if (optionCount === 0) return "no-options";
+  return null;
 }
 
 /**

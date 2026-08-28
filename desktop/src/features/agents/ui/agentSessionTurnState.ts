@@ -31,11 +31,20 @@ export function hasPendingApproval(items: TranscriptItem[]) {
   const last = items.at(-1);
   if (!last) return false;
 
-  const turnId = last.turnId ?? null;
+  // The last row's own turn is the best scope, but trailing status frames and
+  // archive-ingested events can arrive without one. Walk back for the newest
+  // turn id rather than giving up on scoping: an unanswered request abandoned
+  // in an old session would otherwise pin the foot to "awaiting approval"
+  // forever, suppressing the liveness signal for every turn after it.
+  const turnId = newestTurnId(items);
   if (turnId == null) {
-    // No turn scoping available — fall back to the newest permission row.
+    // Genuinely unscoped (no row anywhere carries a turn id). Fall back to the
+    // newest permission row within the newest session, so the answer is still
+    // about current work rather than about anything the transcript ever held.
+    const sessionId = last.sessionId ?? null;
     for (let index = items.length - 1; index >= 0; index -= 1) {
       const item = items[index];
+      if ((item.sessionId ?? null) !== sessionId) break;
       if (isPermission(item)) return !item.outcome;
     }
     return false;
@@ -44,6 +53,15 @@ export function hasPendingApproval(items: TranscriptItem[]) {
   return items.some(
     (item) => item.turnId === turnId && isUnresolvedPermission(item),
   );
+}
+
+/** The turn id of the newest row that carries one. */
+function newestTurnId(items: TranscriptItem[]): string | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const turnId = items[index].turnId;
+    if (turnId) return turnId;
+  }
+  return null;
 }
 
 export function deriveTranscriptTurnState(

@@ -8,9 +8,11 @@ import {
 import { useIdentityQuery } from "@/shared/api/hooks";
 import { useFeedbackToasts } from "@/shared/hooks/useToastEffect";
 import { useStableMap } from "@/shared/hooks/useStableReference";
+import { useAgentWorking } from "@/features/agents/agentWorkingSignal";
 import {
+  buildTurnRequesterIndex,
+  canStopPermissionTurn,
   findPermissionToolItem,
-  findTurnRequesterPubkey,
 } from "./agentPermissionDecision";
 import type { PermissionOption, TranscriptItem } from "./agentSessionTypes";
 
@@ -34,11 +36,16 @@ export type PermissionDecisionState = {
 export type AgentPermissionDecisionContextValue = {
   /** A decision can be delivered: transport connected and a channel in scope. */
   canDecide: boolean;
-  /** The turn can be interrupted, which is also how a pending request is denied. */
+  /**
+   * A turn is live and can be interrupted, which is also how a pending request
+   * is denied. The same gate the panel menu's Stop uses, and it means it: the
+   * cancel frame names no turn, so this must never be true for a card whose
+   * turn has already ended.
+   */
   canStopTurn: boolean;
   decide: (
     itemId: string,
-    requestId: string | null,
+    requestId: string | number | null,
     option: PermissionOption,
   ) => void;
   decisions: ReadonlyMap<string, PermissionDecisionState>;
@@ -70,7 +77,13 @@ const DEFAULT_VALUE: AgentPermissionDecisionContextValue = {
   viewerPubkey: null,
 };
 
-const AgentPermissionDecisionContext =
+/**
+ * Exported so a test can render the block in one explicit posture — requester
+ * or observer, transport up or down — without standing up the provider's
+ * identity query and relay client. Product code uses the provider; nothing
+ * else should be writing this value.
+ */
+export const AgentPermissionDecisionContext =
   React.createContext<AgentPermissionDecisionContextValue>(DEFAULT_VALUE);
 
 export function useAgentPermissionDecisionContext() {
@@ -110,11 +123,17 @@ export function AgentPermissionDecisionProvider({
   const requesterByItemId = useStableMap(
     React.useMemo(() => {
       const map = new Map<string, string>();
+      // One pass to index the turns, then one lookup per row. Searching the
+      // transcript per permission row made this quadratic over a stream that
+      // grows for as long as the agent runs.
+      const requesterByTurn = buildTurnRequesterIndex(items);
       for (const item of items) {
         if (item.type !== "lifecycle" || item.renderClass !== "permission") {
           continue;
         }
-        const requester = findTurnRequesterPubkey(items, item.turnId);
+        const requester = item.turnId
+          ? requesterByTurn.get(item.turnId)
+          : undefined;
         if (requester) map.set(item.id, requester);
       }
       return map;
@@ -128,7 +147,11 @@ export function AgentPermissionDecisionProvider({
         if (item.type !== "lifecycle" || item.renderClass !== "permission") {
           continue;
         }
-        const tool = findPermissionToolItem(items, item.permission?.toolCallId);
+        const tool = findPermissionToolItem(
+          items,
+          item.permission?.toolCallId,
+          item.id,
+        );
         if (tool) map.set(item.id, tool);
       }
       return map;
@@ -141,12 +164,28 @@ export function AgentPermissionDecisionProvider({
   // rather than offering a button that would be discarded in transit.
   const hasChannelScope = Boolean(channelId);
   const canDecide = canSendAgentPermissionDecision() && hasChannelScope;
-  const canStopTurn = canInterruptTurn && hasChannelScope;
+  // Read from the same signal the panel menu's Stop reads, in the same scope,
+  // so the two gates cannot drift: `cancelManagedAgentTurn` carries no turn
+  // id, so a Stop offered on a card whose turn has ended would interrupt some
+  // later, unrelated turn.
+  const { working: isWorking } = useAgentWorking(agentPubkey, channelId);
+  const canStopTurn = canStopPermissionTurn({
+    canInterruptTurn,
+    hasChannelScope,
+    isWorking,
+  });
 
   const decide = React.useCallback(
-    (itemId: string, requestId: string | null, option: PermissionOption) => {
+    (
+      itemId: string,
+      requestId: string | number | null,
+      option: PermissionOption,
+    ) => {
       if (!channelId) return;
-      if (!requestId) {
+      // `== null` rather than a truthiness test: `0` is a perfectly legal
+      // JSON-RPC id, and refusing it would make the card unanswerable for the
+      // first request of a connection that numbers from zero.
+      if (requestId == null) {
         // No JSON-RPC id means nothing to correlate the answer with. Refusing
         // is the only safe move: a decision sent against the wrong request
         // would authorize a call the reader never looked at.

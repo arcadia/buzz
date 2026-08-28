@@ -34,17 +34,22 @@ export function ActivityElapsed({
 
   const [now, setNow] = React.useState(() => Date.now());
 
-  React.useEffect(() => {
-    if (startedMs == null) return;
-    const timer = window.setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => window.clearInterval(timer);
-  }, [startedMs]);
-
-  if (startedMs == null) return null;
-
   // Clock skew between the agent host and this desktop can put `startedAt` in
   // the future; show nothing rather than a negative or jumping value.
-  const elapsedMs = Math.max(0, now - startedMs);
+  const elapsedMs = startedMs == null ? null : Math.max(0, now - startedMs);
+  // Past the credible window this renders nothing forever, so the timer has
+  // no reader left. One archived `executing` row used to leave a 1Hz interval
+  // ticking for the life of the panel, updating a component that returns null.
+  const isTicking =
+    elapsedMs !== null && elapsedMs <= MAX_CREDIBLE_ELAPSED_MS - TICK_MS;
+
+  React.useEffect(() => {
+    if (!isTicking) return;
+    const timer = window.setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [isTicking]);
+
+  if (elapsedMs == null) return null;
   if (elapsedMs > MAX_CREDIBLE_ELAPSED_MS) return null;
   const elapsed = formatDurationMs(elapsedMs);
   if (!elapsed) return null;

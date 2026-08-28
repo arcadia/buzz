@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { buildTranscript } from "./agentSessionTranscript.ts";
 import {
+  buildTurnRequesterIndex,
+  canStopPermissionTurn,
   findPermissionToolItem,
-  findTurnRequesterPubkey,
   isAllowIntent,
   isDenyIntent,
   orderPermissionOptions,
   permissionConsequenceLine,
   permissionOptionAccessibleName,
   permissionOptionIntent,
+  permissionUnavailableReason,
   viewerIsRequester,
 } from "./agentPermissionDecision.ts";
 
@@ -123,34 +126,51 @@ test("consequence copy comes from the classifier tone, and stays silent without 
   assert.equal(permissionConsequenceLine(undefined), null);
 });
 
-test("the gated tool call is found by toolCallId suffix", () => {
+const PERMISSION_ID = "permission:ch:sess:s:req-1";
+
+test("the gated tool call is found by toolCallId within the card's channel", () => {
   const items = [tool(), tool({ id: "tool:ch:call-8" })];
-  assert.equal(findPermissionToolItem(items, "call-7")?.id, "tool:ch:call-7");
-  assert.equal(findPermissionToolItem(items, "call-9"), null);
-  assert.equal(findPermissionToolItem(items, null), null);
+  assert.equal(
+    findPermissionToolItem(items, "call-7", PERMISSION_ID)?.id,
+    "tool:ch:call-7",
+  );
+  assert.equal(findPermissionToolItem(items, "call-9", PERMISSION_ID), null);
+  assert.equal(findPermissionToolItem(items, null, PERMISSION_ID), null);
 });
 
 test("a partial toolCallId does not match a longer id", () => {
-  // Suffix matching is anchored on the ":" separator so "call-7" cannot
-  // collide with "recall-7".
+  // The id is reconstructed whole, so "call-7" cannot collide with "recall-7".
   const items = [tool({ id: "tool:ch:recall-7" })];
-  assert.equal(findPermissionToolItem(items, "call-7"), null);
+  assert.equal(findPermissionToolItem(items, "call-7", PERMISSION_ID), null);
 });
 
 test("the requester is the author of the same turn's user message", () => {
-  const items = [
+  const index = buildTurnRequesterIndex([
     userMessage({ id: "user:0", turnId: "turn-0", authorPubkey: OTHER }),
     userMessage(),
-  ];
-  assert.equal(findTurnRequesterPubkey(items, "turn-1"), REQUESTER);
-  assert.equal(findTurnRequesterPubkey(items, "turn-0"), OTHER);
+  ]);
+  assert.equal(index.get("turn-1"), REQUESTER);
+  assert.equal(index.get("turn-0"), OTHER);
+});
+
+test("the first attributed message in a turn owns it", () => {
+  const index = buildTurnRequesterIndex([
+    userMessage(),
+    userMessage({ id: "user:2", authorPubkey: OTHER }),
+  ]);
+  assert.equal(index.get("turn-1"), REQUESTER);
 });
 
 test("an unscoped or unattributed turn yields no requester", () => {
-  assert.equal(findTurnRequesterPubkey([userMessage()], null), null);
   assert.equal(
-    findTurnRequesterPubkey([userMessage({ authorPubkey: null })], "turn-1"),
-    null,
+    buildTurnRequesterIndex([userMessage({ turnId: null })]).get("turn-1"),
+    undefined,
+  );
+  assert.equal(
+    buildTurnRequesterIndex([userMessage({ authorPubkey: null })]).get(
+      "turn-1",
+    ),
+    undefined,
   );
 });
 
@@ -174,5 +194,194 @@ test("the accessible name carries what is being approved", () => {
       "Apply Terraform change",
     ),
     "Allow once — Apply Terraform change",
+  );
+});
+
+// --- the tool join is channel-anchored (review finding 2) ---
+
+test("the tool join is scoped to the permission item's own channel", () => {
+  // Harnesses number tool calls per session, so `p3` exists in every channel.
+  // The unscoped panel holds every channel's rows, and an unanchored suffix
+  // match hands the first one to the card — putting another channel's command
+  // under "Show the exact command" on the surface that exists to get exactly
+  // that right.
+  const items = [
+    tool({ id: "tool:channel-a:p3", args: { command: "rm -rf /srv/a" } }),
+    tool({ id: "tool:channel-b:p3", args: { command: "ls /srv/b" } }),
+  ];
+
+  assert.equal(
+    findPermissionToolItem(items, "p3", "permission:channel-b:s:req-1")?.id,
+    "tool:channel-b:p3",
+  );
+  assert.equal(
+    findPermissionToolItem(items, "p3", "permission:channel-a:s:req-1")?.id,
+    "tool:channel-a:p3",
+  );
+});
+
+test("the join shows nothing rather than another channel's call", () => {
+  const items = [tool({ id: "tool:channel-a:p3" })];
+  assert.equal(
+    findPermissionToolItem(items, "p3", "permission:channel-b:s:req-1"),
+    null,
+  );
+});
+
+test("the reducer's own permission and tool ids line up for the join", () => {
+  // The join reconstructs a tool id from the permission id. That coupling is
+  // invisible to both sides, so it is asserted against real reducer output
+  // rather than hand-written ids.
+  const channelA = "11111111-1111-1111-1111-111111111111";
+  const channelB = "22222222-2222-2222-2222-222222222222";
+  const sharedToolCallId = "p3";
+
+  function toolCall(seq, channelId, command) {
+    return {
+      seq,
+      timestamp,
+      kind: "acp_read",
+      agentIndex: 0,
+      channelId,
+      sessionId: "session-1",
+      turnId: `turn-${channelId}`,
+      payload: {
+        method: "session/update",
+        params: {
+          sessionId: "session-1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: sharedToolCallId,
+            title: "dev__shell",
+            status: "pending",
+            rawInput: { command },
+          },
+        },
+      },
+    };
+  }
+
+  function permissionFrame(seq, channelId) {
+    return {
+      seq,
+      timestamp,
+      kind: "acp_read",
+      agentIndex: 0,
+      channelId,
+      sessionId: "session-1",
+      turnId: `turn-${channelId}`,
+      payload: {
+        jsonrpc: "2.0",
+        id: seq,
+        method: "session/request_permission",
+        params: {
+          title: "Run it",
+          toolCallId: sharedToolCallId,
+          options: [{ optionId: "once", kind: "allow_once", name: "Allow" }],
+        },
+      },
+    };
+  }
+
+  const items = buildTranscript([
+    toolCall(1, channelA, "rm -rf /srv/a"),
+    permissionFrame(2, channelA),
+    toolCall(3, channelB, "ls /srv/b"),
+    permissionFrame(4, channelB),
+  ]);
+
+  const permissions = items.filter((item) => item.renderClass === "permission");
+  assert.equal(permissions.length, 2);
+  for (const permission of permissions) {
+    const joined = findPermissionToolItem(
+      items,
+      permission.permission.toolCallId,
+      permission.id,
+    );
+    assert.ok(joined, "every permission should join to a tool row");
+    assert.equal(joined.channelId, permission.channelId);
+  }
+});
+
+// --- the Stop gate matches the panel menu's gate (review finding 4) ---
+
+test("stopping a turn needs a live turn, the capability, and a channel", () => {
+  // The panel menu gates its Stop on `isWorking && canInterruptTurn`. This
+  // card claims the same gate, and a Stop offered on a dead turn interrupts
+  // whatever unrelated turn is running by then.
+  assert.equal(
+    canStopPermissionTurn({
+      canInterruptTurn: true,
+      hasChannelScope: true,
+      isWorking: true,
+    }),
+    true,
+  );
+  assert.equal(
+    canStopPermissionTurn({
+      canInterruptTurn: true,
+      hasChannelScope: true,
+      isWorking: false,
+    }),
+    false,
+  );
+  assert.equal(
+    canStopPermissionTurn({
+      canInterruptTurn: false,
+      hasChannelScope: true,
+      isWorking: true,
+    }),
+    false,
+  );
+  assert.equal(
+    canStopPermissionTurn({
+      canInterruptTurn: true,
+      hasChannelScope: false,
+      isWorking: true,
+    }),
+    false,
+  );
+});
+
+// --- no silent dead end when there is nothing to press (review finding 5) ---
+
+test("the requester is always told why there are no buttons", () => {
+  assert.equal(
+    permissionUnavailableReason({
+      canDecide: true,
+      isRequester: true,
+      optionCount: 2,
+    }),
+    null,
+  );
+  assert.equal(
+    permissionUnavailableReason({
+      canDecide: false,
+      isRequester: true,
+      optionCount: 2,
+    }),
+    "transport",
+  );
+  // Every option arrived without an `optionId`, so none can be answered with.
+  // Without this the card is an approval demand with zero affordance and zero
+  // reason, and silence denies it.
+  assert.equal(
+    permissionUnavailableReason({
+      canDecide: true,
+      isRequester: true,
+      optionCount: 0,
+    }),
+    "no-options",
+  );
+});
+
+test("a non-requester gets no unavailable copy — the block already names the owner", () => {
+  assert.equal(
+    permissionUnavailableReason({
+      canDecide: false,
+      isRequester: false,
+      optionCount: 0,
+    }),
+    null,
   );
 });
