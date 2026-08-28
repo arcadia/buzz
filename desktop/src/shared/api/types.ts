@@ -508,21 +508,6 @@ export type ControlResultFrame = {
   modelId?: string;
 };
 
-/**
- * One answer to a pending `session/request_permission`.
- *
- * `requestId` is the JSON-RPC id of the request being answered — the harness
- * needs it to match the parked request, and it is what stops a stale click on
- * a request the agent has already resolved from landing on the next one.
- * `optionId` is copied verbatim from the request's own options; it is never
- * reconstructed from a `kind`, because the harness's own comment is emphatic
- * that option ids are not fixed strings.
- */
-export type PermissionDecisionInput = {
-  requestId: string;
-  optionId: string;
-};
-
 export type GitBashPrerequisite = {
   available: boolean;
   path: string | null;
