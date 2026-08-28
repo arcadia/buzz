@@ -2,6 +2,7 @@ import type {
   AgentActivityDescriptor,
   AgentActivityRenderClass,
   ObserverEvent,
+  PermissionRequestDetails,
   PromptSection,
   ToolStatus,
   TranscriptItem,
@@ -12,8 +13,17 @@ import {
   normalizeToolStatus,
 } from "./agentSessionToolCatalog";
 import { classifyTool } from "./agentSessionToolClassifier";
-import { asRecord, asString, titleCase } from "./agentSessionUtils";
 import {
+  describePermissionOutcome,
+  describePermissionRequest,
+  jsonRpcIdKey,
+  jsonRpcIdValue,
+  PERMISSION_REQUEST_TITLE,
+  PERMISSION_UNANSWERED_OUTCOME,
+} from "./agentSessionPermissionFrames";
+import { asRecord, asString } from "./agentSessionUtils";
+import {
+  describeFreeformStatus,
   describeTurnStarted,
   describeSessionResolved,
   extractBlockText,
@@ -26,6 +36,8 @@ import {
   extractToolResult,
   parsePromptText,
   parseSystemPromptSections,
+  rawPayloadTitle,
+  stringifyPayload,
 } from "./agentSessionTranscriptHelpers";
 import { friendlyTurnErrorCopy } from "../lib/friendlyAgentLastError";
 
@@ -163,120 +175,6 @@ function maybeNostrEventId(id: string | null | undefined) {
   return id && /^[0-9a-fA-F]{64}$/.test(id) ? id : null;
 }
 
-function stringifyPayload(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function describePermissionRequest(payload: Record<string, unknown>) {
-  const params = asRecord(payload.params);
-  const title =
-    asString(params.title) ??
-    asString(params.message) ??
-    asString(params.reason) ??
-    "Permission requested";
-  const toolCallId =
-    asString(params.toolCallId) ?? asString(params.tool_call_id);
-  const options = Array.isArray(params.options)
-    ? params.options
-        .map((option) => {
-          const record = asRecord(option);
-          return (
-            asString(record.name) ??
-            asString(record.kind) ??
-            asString(record.optionId)
-          );
-        })
-        .filter((option): option is string => Boolean(option))
-    : [];
-  const detail: string[] = [];
-  if (title !== "Permission requested") detail.push(title);
-  if (toolCallId) detail.push(`Tool call: ${toolCallId}`);
-  if (options.length > 0) detail.push(`Options: ${options.join(", ")}`);
-
-  // Build optionId → kind map for outcome labeling on the response.
-  const optionNames = new Map<string, string>();
-  if (Array.isArray(params.options)) {
-    for (const option of params.options) {
-      const record = asRecord(option);
-      const optionId = asString(record.optionId);
-      const kind = asString(record.kind);
-      if (optionId && kind) {
-        optionNames.set(optionId, kind);
-      }
-    }
-  }
-
-  return {
-    title,
-    text: detail.join("\n"),
-    optionNames,
-    descriptor: {
-      renderClass: "permission" as const,
-      label: "Permission requested",
-      preview: title,
-      action: { verb: "Requested", object: title },
-      tone: "admin" as const,
-      operation: "session/request_permission",
-      object: title,
-      source: "acp" as const,
-      groupKey: "permission:request",
-    },
-  };
-}
-
-/**
- * Format a human-readable outcome label from a permission response.
- * kind values from ACP: allow_once, allow_always, reject_once, reject_always.
- * "reject_*" kinds are denials; anything else that is selected is an approval.
- */
-function describePermissionOutcome(
-  outcome: string,
-  optionId: string | null,
-  optionNames: Map<string, string>,
-): string {
-  if (outcome === "cancelled") {
-    return "Cancelled";
-  }
-  if (outcome === "selected" && optionId) {
-    const kind = optionNames.get(optionId) ?? optionId;
-    const isDenial = kind.startsWith("reject");
-    const verb = isDenial ? "Denied" : "Approved";
-    return `${verb} (${kind})`;
-  }
-  return outcome;
-}
-
-/**
- * Stable map key for a JSON-RPC id, which may be a string or a finite number
- * per the spec. Using JSON.stringify avoids collisions between the number 1 and
- * the string "1". Returns null for null, undefined, or non-id values (objects,
- * booleans) so callers can gate on presence without a separate type check.
- */
-function jsonRpcId(value: unknown): string | null {
-  if (typeof value === "string") return JSON.stringify(value);
-  if (typeof value === "number" && Number.isFinite(value))
-    return JSON.stringify(value);
-  return null;
-}
-
-function describeFreeformStatus(payload: Record<string, unknown>) {
-  const statusType = asString(payload.type) ?? asString(payload.status);
-  const title =
-    asString(payload.title) ?? (statusType ? titleCase(statusType) : null);
-  const text = asString(payload.text) ?? asString(payload.message);
-  if (!title || !text) return null;
-  return { statusType: statusType ?? title.toLowerCase(), title, text };
-}
-
-function rawPayloadTitle(payload: unknown) {
-  const record = asRecord(payload);
-  return asString(record.method) ?? asString(record.type) ?? "raw_json_rpc";
-}
-
 type TranscriptItemContext = {
   channelId: string | null;
   turnId: string | null;
@@ -408,6 +306,7 @@ function upsertLifecycleItem(
   ctx: TranscriptItemContext,
   acpSource?: string,
   descriptor?: AgentActivityDescriptor,
+  permission?: PermissionRequestDetails,
 ) {
   const existing = d.itemsById.get(id);
   if (existing?.type === "lifecycle") {
@@ -417,6 +316,7 @@ function upsertLifecycleItem(
       title,
       text: joinLifecycleText(existing.text, text),
       descriptor: descriptor ?? existing.descriptor,
+      permission: permission ?? existing.permission,
       channelId: ctx.channelId,
       turnId: ctx.turnId ?? existing.turnId,
       sessionId: ctx.sessionId ?? existing.sessionId,
@@ -434,11 +334,111 @@ function upsertLifecycleItem(
     text,
     timestamp,
     descriptor,
+    permission,
     channelId: ctx.channelId,
     turnId: ctx.turnId,
     sessionId: ctx.sessionId,
     acpSource,
   });
+}
+
+/**
+ * A permission request is a snapshot of one question, not a running log.
+ *
+ * `upsertLifecycleItem` joins text across frames, which is right for repeated
+ * `turn_error` lines and wrong here: the same request can arrive twice (a live
+ * frame and an archive rebuild), and joining would print its description
+ * twice. The payload is likewise the frame's own, never merged with an older
+ * one — the headline and the buttons on this card have to describe the same
+ * call, because approving what you read must not authorize something else.
+ *
+ * Kept apart from the status/error upsert so the two cannot drift into each
+ * other's merge rules.
+ */
+function upsertPermissionItem(
+  d: TranscriptDraft,
+  id: string,
+  text: string,
+  timestamp: string,
+  ctx: TranscriptItemContext,
+  descriptor: AgentActivityDescriptor,
+  permission: PermissionRequestDetails,
+) {
+  const existing = d.itemsById.get(id);
+  const fields = {
+    type: "lifecycle" as const,
+    renderClass: "permission" as const,
+    title: PERMISSION_REQUEST_TITLE,
+    text,
+    descriptor,
+    permission,
+    channelId: ctx.channelId,
+    acpSource: "permission_request",
+  };
+
+  if (existing?.type === "lifecycle") {
+    replaceItem(d, id, {
+      ...existing,
+      ...fields,
+      turnId: ctx.turnId ?? existing.turnId,
+      sessionId: ctx.sessionId ?? existing.sessionId,
+    });
+    return;
+  }
+
+  sealOpenMessages(d);
+  pushItem(d, {
+    ...fields,
+    id,
+    timestamp,
+    turnId: ctx.turnId,
+    sessionId: ctx.sessionId,
+  });
+}
+
+/**
+ * Close out every permission the ending turn never got an answer for.
+ *
+ * Only the harness's own response resolves a request, and a turn that errors,
+ * panics, or completes never sends one. Left alone the card reads "Waiting for
+ * your decision" forever — and its Stop button carries no turn id, so pressing
+ * it would interrupt whatever unrelated turn is running by then. The wording
+ * claims only what is known: nobody answered, and an unanswered request is
+ * denied by the runtime.
+ */
+function resolvePermissionsForEndedTurn(
+  d: TranscriptDraft,
+  turnId: string | null,
+) {
+  // Without a turn id there is nothing to scope the sweep to, and resolving
+  // every open request would retire ones that are still live.
+  if (!turnId) return;
+
+  // Scanning items rather than the pending-response index deliberately: a
+  // request that arrived without a JSON-RPC id is never parked there, and it
+  // is exactly the request that can never be answered.
+  const settled = new Set<string>();
+  // Captured before the first replaceItem swaps `d.items` for a copy; the
+  // entries are the same objects either way.
+  const scanned = d.items;
+  for (const item of scanned) {
+    if (item.type !== "lifecycle" || item.renderClass !== "permission") {
+      continue;
+    }
+    if (item.turnId !== turnId || item.outcome) continue;
+    replaceItem(d, item.id, {
+      ...item,
+      outcome: PERMISSION_UNANSWERED_OUTCOME,
+    });
+    settled.add(item.id);
+  }
+
+  if (settled.size === 0) return;
+  d.pendingPermissions = new Map(
+    [...d.pendingPermissions].filter(
+      ([, pending]) => !settled.has(pending.itemId),
+    ),
+  );
 }
 
 // Like upsertLifecycleItem but REPLACES the text on update instead of
@@ -769,6 +769,11 @@ export function processTranscriptEvent(
       ctx,
       event.kind,
     );
+  } else if (event.kind === "turn_completed") {
+    // No row of its own — the transcript already shows the turn's work. The
+    // turn ending is still the moment any request it left open stops being a
+    // live question, so it is recorded as such.
+    resolvePermissionsForEndedTurn(d, event.turnId);
   } else if (event.kind === "turn_error" || event.kind === "agent_panic") {
     const payload = asRecord(event.payload);
     const outcome = asString(payload.outcome) ?? "error";
@@ -786,37 +791,54 @@ export function processTranscriptEvent(
       ctx,
       event.kind,
     );
+    resolvePermissionsForEndedTurn(d, event.turnId);
   } else if (event.kind === "acp_read" || event.kind === "acp_write") {
     const payload = asRecord(event.payload);
     const method = asString(payload.method);
 
     if (method === "session/request_permission") {
       const request = describePermissionRequest(payload);
-      const itemId = `permission:${ch}:${event.turnId ?? event.seq}`;
-      upsertLifecycleItem(
+      // ACP asks permission per tool call, so several requests in one turn is
+      // the normal case. Keying the card by turn merged them: the second
+      // request inherited the first's resolved outcome and never appeared at
+      // all, or — with both open — took the first's headline over its own
+      // options, buttons and id. The JSON-RPC id is the request's own
+      // identity; `seq` stands in for a frame that carries none, and the
+      // session scopes ids that restart with each new harness connection.
+      const rpcKey = jsonRpcIdKey(payload.id);
+      const requestKey = rpcKey ?? `seq:${event.seq}`;
+      const sessionKey = event.sessionId ?? d.latestSessionId ?? "nosession";
+      const itemId = `permission:${ch}:${sessionKey}:${requestKey}`;
+      upsertPermissionItem(
         d,
         itemId,
-        "permission",
-        "Permission requested",
         request.text,
         event.timestamp,
         ctx,
-        "permission_request",
         request.descriptor,
+        {
+          // The raw id, not the map key: this is shipped verbatim as the
+          // decision frame's `requestId`, and a JSON-encoded key would reach
+          // the harness wrapped in literal quotes and match nothing.
+          requestId: jsonRpcIdValue(payload.id),
+          toolCallId: request.toolCallId,
+          options: request.options,
+        },
       );
-      // Index by JSON-RPC id so the response (acp_write with result.outcome,
-      // no method) can correlate by id rather than by turn/seq.
-      const requestId = jsonRpcId(payload.id);
-      if (requestId) {
+      if (rpcKey) {
+        // Index by JSON-RPC id so the response (acp_write with result.outcome,
+        // no method) can correlate by id rather than by turn/seq. A frame with
+        // no id can never be correlated, so it is not parked here — the
+        // turn-end sweep is what eventually closes it out.
         d.pendingPermissions = new Map(d.pendingPermissions);
-        d.pendingPermissions.set(requestId, {
+        d.pendingPermissions.set(rpcKey, {
           itemId,
           optionNames: request.optionNames,
         });
       }
     } else if (event.kind === "acp_write" && !method) {
       // Permission response: {"id": <same as request>, "result": {"outcome": {...}}}
-      const responseId = jsonRpcId(payload.id);
+      const responseId = jsonRpcIdKey(payload.id);
       const result = asRecord(asRecord(payload.result).outcome);
       const outcomeKind = asString(result.outcome);
       const pending = responseId ? d.pendingPermissions.get(responseId) : null;

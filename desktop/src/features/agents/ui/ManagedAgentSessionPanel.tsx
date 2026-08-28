@@ -38,12 +38,20 @@ import {
   useArchivedChannelEvents,
 } from "./useObserverEvents";
 import { buildTranscriptState } from "./agentSessionTranscript";
+import { AgentPermissionDecisionProvider } from "./useAgentPermissionDecisions";
 
 type ManagedAgentSessionPanelProps = {
   agent: Pick<ManagedAgent, "pubkey" | "name" | "status"> & {
     avatarUrl?: string | null;
   };
   autoTail?: boolean;
+  /**
+   * Whether this viewer can interrupt the agent's turn. Locally managed agents
+   * only — the same gate the panel menu's Stop item uses. It reaches the
+   * transcript because stopping is how a pending approval gets denied, so the
+   * approval block has to know whether it can offer that.
+   */
+  canInterruptTurn?: boolean;
   channelId?: string | null;
   className?: string;
   emptyDescription?: string;
@@ -62,6 +70,7 @@ type ManagedAgentSessionPanelProps = {
 export function ManagedAgentSessionPanel({
   agent,
   autoTail = false,
+  canInterruptTurn = false,
   channelId = null,
   className,
   emptyDescription = "Mention this agent in a channel to watch the next turn.",
@@ -152,6 +161,7 @@ export function ManagedAgentSessionPanel({
         agentPubkey={agent.pubkey}
         connectionState={connectionState}
         autoTail={autoTail}
+        canInterruptTurn={canInterruptTurn}
         channelId={channelId}
         emptyDescription={emptyDescription}
         emptyState={emptyState}
@@ -210,6 +220,7 @@ function SessionBody({
   agentName,
   agentPubkey,
   autoTail,
+  canInterruptTurn,
   connectionState,
   channelId,
   emptyDescription,
@@ -229,6 +240,7 @@ function SessionBody({
   agentName: string;
   agentPubkey: string;
   autoTail: boolean;
+  canInterruptTurn: boolean;
   channelId: string | null;
   connectionState: ConnectionState;
   emptyDescription: string;
@@ -281,20 +293,28 @@ function SessionBody({
             autoTail && "min-h-0 flex-1 overflow-hidden",
           )}
         >
-          <AgentSessionTranscriptList
-            agentAvatarUrl={agentAvatarUrl}
+          <AgentPermissionDecisionProvider
             agentName={agentName}
             agentPubkey={agentPubkey}
+            canInterruptTurn={canInterruptTurn}
             channelId={channelId}
-            emptyDescription={emptyDescription}
-            emptyState={emptyState}
             items={transcript}
-            profiles={profiles}
-            contentContainerClassName={transcriptContentClassName}
-            scrollScopeKey={`${agentPubkey}:${channelId ?? "all"}`}
-            autoTail={autoTail}
-            variant={transcriptVariant}
-          />
+          >
+            <AgentSessionTranscriptList
+              agentAvatarUrl={agentAvatarUrl}
+              agentName={agentName}
+              agentPubkey={agentPubkey}
+              channelId={channelId}
+              emptyDescription={emptyDescription}
+              emptyState={emptyState}
+              items={transcript}
+              profiles={profiles}
+              contentContainerClassName={transcriptContentClassName}
+              scrollScopeKey={`${agentPubkey}:${channelId ?? "all"}`}
+              autoTail={autoTail}
+              variant={transcriptVariant}
+            />
+          </AgentPermissionDecisionProvider>
           {rawRail.mode === "side" ? <RawEventRail events={events} /> : null}
         </div>
       )}

@@ -824,7 +824,7 @@ test("buildTranscript no-ops on a permission response with an unmatched id", () 
 test("buildTranscript appends Approved outcome for a numeric JSON-RPC id (selected allow_once)", () => {
   // JSON-RPC 2.0 allows numeric ids; the ACP runtime preserves them as
   // serde_json::Value. asString() drops numbers, so this exercises the
-  // jsonRpcId() helper path that handles finite-number ids.
+  // jsonRpcIdKey() helper path that handles finite-number ids.
   const transcript = buildTranscript([
     makePermissionRequest(1, 42),
     makePermissionResponse(2, 42, "selected", "allow_once"),
@@ -864,6 +864,180 @@ test('buildTranscript does not collide between numeric id 1 and string id "1"', 
 
   assert.equal(transcriptNumeric[0].outcome, "Approved (allow_once)");
   assert.equal(transcriptString[0].outcome, "Denied (reject_once)");
+});
+
+// --- one card per request, not per turn (review finding 1) ---
+
+/**
+ * ACP asks permission per tool call, so several requests in one turn is the
+ * normal case, not an edge. Each one is a separate question with its own
+ * options, its own id, and its own answer.
+ */
+function makeNamedPermissionRequest(seq, requestId, title, overrides = {}) {
+  const request = makePermissionRequest(seq, requestId);
+  request.payload.params = {
+    ...request.payload.params,
+    title,
+    ...overrides,
+  };
+  return request;
+}
+
+function permissionItems(transcript) {
+  return transcript.filter((item) => item.renderClass === "permission");
+}
+
+test("two permission requests in one turn each get their own card", () => {
+  const transcript = buildTranscript([
+    makeNamedPermissionRequest(1, "req-a", "Push to origin"),
+    makeNamedPermissionRequest(2, "req-b", "Delete the production bucket"),
+  ]);
+
+  const permissions = permissionItems(transcript);
+  assert.equal(permissions.length, 2);
+  assert.match(permissions[0].text, /Push to origin/);
+  assert.doesNotMatch(permissions[0].text, /production bucket/);
+  assert.match(permissions[1].text, /Delete the production bucket/);
+  assert.doesNotMatch(permissions[1].text, /Push to origin/);
+});
+
+test("a second request in a turn whose first was answered still renders as pending", () => {
+  // The collapsed "resolved" row is the one state that hides the buttons
+  // entirely. Inheriting it from the previous request would leave the reader
+  // unable to answer a live request they cannot see.
+  const transcript = buildTranscript([
+    makeNamedPermissionRequest(1, "req-a", "Push to origin"),
+    makePermissionResponse(2, "req-a", "selected", "allow_once"),
+    makeNamedPermissionRequest(3, "req-b", "Delete the production bucket"),
+  ]);
+
+  const permissions = permissionItems(transcript);
+  assert.equal(permissions.length, 2);
+  assert.equal(permissions[0].outcome, "Approved (allow_once)");
+  assert.equal(permissions[1].outcome, undefined);
+});
+
+test("a request's payload is its own, never the next request's", () => {
+  // The headline and the buttons must describe the same call: a card showing
+  // request #1's words over request #2's options and id would authorize
+  // something other than what was read.
+  const transcript = buildTranscript([
+    makeNamedPermissionRequest(1, "req-a", "Push to origin", {
+      toolCallId: "call-a",
+      options: [{ optionId: "a-allow", kind: "allow_once", name: "Allow" }],
+    }),
+    makeNamedPermissionRequest(2, "req-b", "Delete the production bucket", {
+      toolCallId: "call-b",
+      options: [{ optionId: "b-allow", kind: "allow_once", name: "Allow" }],
+    }),
+  ]);
+
+  const [first, second] = permissionItems(transcript);
+  assert.equal(first.permission.toolCallId, "call-a");
+  assert.equal(first.permission.requestId, "req-a");
+  assert.deepEqual(
+    first.permission.options.map((option) => option.optionId),
+    ["a-allow"],
+  );
+  assert.equal(second.permission.toolCallId, "call-b");
+  assert.equal(second.permission.requestId, "req-b");
+  assert.deepEqual(
+    second.permission.options.map((option) => option.optionId),
+    ["b-allow"],
+  );
+});
+
+test("re-ingesting the same request frame leaves one card saying one thing", () => {
+  // A live frame and an archive rebuild can both deliver the same request.
+  // A request is a snapshot, not a log, so its text is replaced rather than
+  // joined the way repeated turn_error lines are.
+  const transcript = buildTranscript([
+    makeNamedPermissionRequest(1, "req-a", "Push to origin"),
+    makeNamedPermissionRequest(2, "req-a", "Push to origin"),
+  ]);
+
+  const permissions = permissionItems(transcript);
+  assert.equal(permissions.length, 1);
+  assert.equal(
+    permissions[0].text.match(/Push to origin/g).length,
+    1,
+    "the request description must not accumulate on re-ingest",
+  );
+});
+
+// --- the request id on the wire is the JSON-RPC id (review finding 3) ---
+
+test("a string JSON-RPC id reaches the renderer unquoted", () => {
+  // `permission.requestId` is shipped verbatim as the decision frame's
+  // requestId. A JSON-encoded map key would arrive at the harness wrapped in
+  // literal quotes and never match the parked request.
+  const transcript = buildTranscript([makePermissionRequest(1, "req-1")]);
+  assert.equal(transcript[0].permission.requestId, "req-1");
+});
+
+test("a numeric JSON-RPC id keeps its number type", () => {
+  const transcript = buildTranscript([makePermissionRequest(1, 42)]);
+  assert.equal(transcript[0].permission.requestId, 42);
+});
+
+test("a request with no JSON-RPC id carries no requestId", () => {
+  const request = makePermissionRequest(1, "req-1");
+  request.payload.id = undefined;
+  const transcript = buildTranscript([request]);
+  assert.equal(transcript[0].permission.requestId, null);
+});
+
+// --- a pending request does not outlive its turn (review finding 4) ---
+
+function turnEndEvent(seq, kind, turnId = "turn-1") {
+  return {
+    seq,
+    timestamp: "2026-06-30T10:00:05.000Z",
+    kind,
+    agentIndex: 0,
+    channelId: "channel-1",
+    sessionId: "session-1",
+    turnId,
+    payload: { outcome: "failed", error: "harness exited" },
+  };
+}
+
+for (const kind of ["turn_error", "agent_panic", "turn_completed"]) {
+  test(`a permission still pending when the turn ends via ${kind} is resolved`, () => {
+    // Nothing else ever answers it: the response frame never arrived, so the
+    // card would sit on "Waiting for your decision" forever and its Stop
+    // button would interrupt whatever unrelated turn is running by then.
+    const transcript = buildTranscript([
+      makePermissionRequest(1, "req-1"),
+      turnEndEvent(2, kind),
+    ]);
+
+    const [permission] = permissionItems(transcript);
+    assert.equal(permission.outcome, "Unanswered (turn ended)");
+  });
+}
+
+test("ending one turn leaves another turn's pending request alone", () => {
+  const transcript = buildTranscript([
+    makePermissionRequest(1, "req-1", "turn-1"),
+    makePermissionRequest(2, "req-2", "turn-2"),
+    turnEndEvent(3, "turn_error", "turn-1"),
+  ]);
+
+  const [first, second] = permissionItems(transcript);
+  assert.equal(first.outcome, "Unanswered (turn ended)");
+  assert.equal(second.outcome, undefined);
+});
+
+test("a turn end does not overwrite an outcome the harness already sent", () => {
+  const transcript = buildTranscript([
+    makePermissionRequest(1, "req-1"),
+    makePermissionResponse(2, "req-1", "selected", "allow_once"),
+    turnEndEvent(3, "turn_error"),
+  ]);
+
+  const [permission] = permissionItems(transcript);
+  assert.equal(permission.outcome, "Approved (allow_once)");
 });
 
 // ─── observer parity: new session/update classifier cases ────────────────────

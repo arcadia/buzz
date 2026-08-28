@@ -7,6 +7,7 @@ import {
 import { cn } from "@/shared/lib/cn";
 import { normalizePubkey } from "@/shared/lib/pubkey";
 import type { TranscriptItem } from "../agentSessionTypes";
+import { activityStateForItem } from "../agentActivityState";
 import { getBuzzToolInfo } from "../agentSessionToolCatalog";
 import { buildCompactToolSummary } from "../agentSessionToolSummary";
 import type { AgentTranscriptIdentityProps } from "../activityRenderClasses/types";
@@ -39,6 +40,7 @@ export function ToolItem({
   const canonicalToolName = item.buzzToolName ?? item.toolName;
   const buzzTool = getBuzzToolInfo(canonicalToolName);
   const compactSummary = buildCompactToolSummary(item);
+  const activityState = activityStateForItem(item);
   const duration = getToolDurationDisplay(item);
   const messageLink = getSentMessageLink(item);
   const timestampTitle = formatTranscriptTimestampTitle(item.timestamp);
@@ -65,6 +67,7 @@ export function ToolItem({
         title={timestampTitle}
       >
         <CompactMessageSummary
+          action={compactSummary.action}
           args={item.args}
           avatarUrl={agentResolvedAvatarUrl}
           description={buzzTool?.label}
@@ -123,6 +126,8 @@ export function ToolItem({
             fileEditSummary={compactSummary.fileEditSummary}
             kind={compactSummary.kind}
             preview={compactSummary.preview}
+            startedAt={item.startedAt}
+            state={activityState}
             thumbnailSrc={compactSummary.thumbnailSrc}
             label={compactSummary.label}
           />

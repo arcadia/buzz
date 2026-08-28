@@ -461,3 +461,36 @@ export function describeRawEvent(event: ObserverEvent): string {
   }
   return method ?? event.kind;
 }
+
+/**
+ * Pretty-printed payload for the raw rail, falling back to String() for a
+ * value JSON cannot represent (a cycle, a BigInt) rather than throwing inside
+ * a render.
+ */
+export function stringifyPayload(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * Free-form observer status records are not part of the ACP union. Only an
+ * explicit title/text pair is surfaced; anything else stays out of the feed
+ * rather than being guessed at.
+ */
+export function describeFreeformStatus(payload: Record<string, unknown>) {
+  const statusType = asString(payload.type) ?? asString(payload.status);
+  const title =
+    asString(payload.title) ?? (statusType ? titleCase(statusType) : null);
+  const text = asString(payload.text) ?? asString(payload.message);
+  if (!title || !text) return null;
+  return { statusType: statusType ?? title.toLowerCase(), title, text };
+}
+
+/** Best available name for an uninterpreted JSON-RPC payload. */
+export function rawPayloadTitle(payload: unknown) {
+  const record = asRecord(payload);
+  return asString(record.method) ?? asString(record.type) ?? "raw_json_rpc";
+}

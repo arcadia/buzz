@@ -44,6 +44,8 @@ export default defineConfig({
         "**/profile-active-turn.spec.ts",
         "**/config-bridge-screenshots.spec.ts",
         "**/observer-feed-screenshots.spec.ts",
+        "**/agent-tool-timeline-screenshots.spec.ts",
+        "**/agent-approval-control-screenshots.spec.ts",
         "**/core-memory-screenshots.spec.ts",
         "**/activity-scope-label-screenshots.spec.ts",
         "**/welcome-agent-modal-screenshots.spec.ts",

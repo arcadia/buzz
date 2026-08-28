@@ -15,6 +15,16 @@ ignore = [
     # remove these when upstream catches up.
     { id = "RUSTSEC-2026-0194", reason = "transitive via rust-s3 and mesh-llm→plist; trusted-input XML only; no upstream fix available yet" },
     { id = "RUSTSEC-2026-0195", reason = "transitive via rust-s3 and mesh-llm→plist; trusted-input XML only; no upstream fix available yet" },
+    # nostr-relay-pool 0.44.3 — the crate is now flagged UNMAINTAINED. This is a
+    # maintenance-status advisory, not a vulnerability: the actual vulnerability in
+    # this crate (RUSTSEC-2026-0224, verification cache poisoning that let forged
+    # events bypass signature validation) IS fixed, by the bump to 0.44.3 that
+    # accompanies this entry. cargo-deny reports "no safe upgrade available" because
+    # there is no maintained successor to move to.
+    # ⚠ This is load-bearing code — it is the relay pool the desktop client talks
+    # through — so an unmaintained upstream is a real risk to carry, not a formality.
+    # It wants an owner and a migration plan, not a permanent ignore.
+    { id = "RUSTSEC-2026-0243", reason = "nostr-relay-pool unmaintained; no maintained successor exists. The vulnerability in it (0224) is fixed by the 0.44.3 bump; this entry covers maintenance status only and should be revisited, not kept indefinitely" },
 ]
 
 [licenses]

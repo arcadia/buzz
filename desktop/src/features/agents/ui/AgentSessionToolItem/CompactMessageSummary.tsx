@@ -5,8 +5,9 @@ import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import { cn } from "@/shared/lib/cn";
 import { useProfilePanel } from "@/shared/context/ProfilePanelContext";
 import { Markdown } from "@/shared/ui/markdown";
-import { UserAvatar } from "@/shared/ui/UserAvatar";
 import { useAgentSessionTranscriptVariant } from "../agentSessionTranscriptContext";
+import type { AgentActivityAction } from "../agentSessionTypes";
+import { AgentByline } from "../activityRenderClasses/AgentByline";
 import { MessageLinkHoverCue } from "../activityRenderClasses/MessageLinkHoverCue";
 import { TranscriptTimestamp } from "../activityRenderClasses/TranscriptTimestamp";
 import { useTranscriptBubbleOverflow } from "../activityRenderClasses/useTranscriptBubbleOverflow";
@@ -16,6 +17,7 @@ import { SentMessageContextDialog } from "./SentMessageContextDialog";
 import { useSentMessageBody } from "./useSentMessageBody";
 
 export function CompactMessageSummary({
+  action,
   args,
   avatarUrl,
   description,
@@ -31,6 +33,7 @@ export function CompactMessageSummary({
   result,
   timestamp,
 }: {
+  action: AgentActivityAction | null;
   args: Record<string, unknown>;
   avatarUrl: string | null;
   description?: string;
@@ -57,10 +60,13 @@ export function CompactMessageSummary({
     useTranscriptBubbleOverflow(shouldClampBubble);
   const canOpenMessage = shouldClampBubble && messageLink !== null;
   const mutedTone = compactSummaryTone();
-  const avatarClassName = cn(
-    "mr-2 mt-1 shrink-0",
-    isCompactPreview ? "size-5" : "size-7",
-  );
+  // The classifier's verb reads as an event ("Sent message"), matching every
+  // other verb on the timeline; the tool's own `label` ("Send Message") reads
+  // as a capability the agent has rather than one it used. The action's object
+  // is deliberately dropped: for a relay send it is the message content, which
+  // is already the bubble directly below. This presenter only ever renders a
+  // message send, so "message" is accurate by construction.
+  const bylineDetail = action ? `${action.verb} message` : label;
   const handleBubbleClick = React.useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (!messageLink || isNestedInteractiveTarget(event)) return;
@@ -100,42 +106,19 @@ export function CompactMessageSummary({
     : {};
   return (
     <>
-      <div className="flex max-w-full flex-row items-start justify-start">
-        {openProfilePanel && !isCompactPreview ? (
-          <button
-            aria-label={`Open ${displayName} profile`}
-            className={cn(
-              avatarClassName,
-              "pointer-events-auto rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            )}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              openProfilePanel(pubkey);
-            }}
-            type="button"
-          >
-            <UserAvatar
-              avatarUrl={avatarUrl}
-              className="size-full text-xs"
-              displayName={displayName}
-              size="sm"
-              testId="transcript-agent-sent-avatar"
-            />
-          </button>
-        ) : (
-          <UserAvatar
+      <div className="flex max-w-full flex-col items-start gap-1">
+        {isCompactPreview ? null : (
+          <AgentByline
             avatarUrl={avatarUrl}
-            className={cn(
-              avatarClassName,
-              isCompactPreview ? "text-3xs" : "text-xs",
-            )}
+            detail={bylineDetail}
             displayName={displayName}
-            size="sm"
-            testId="transcript-agent-sent-avatar"
+            onOpenProfile={
+              openProfilePanel ? () => openProfilePanel(pubkey) : null
+            }
+            testId="transcript-agent-sent-byline"
           />
         )}
-        <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
+        <div className="flex w-full min-w-0 flex-col items-start gap-1">
           <div
             className={cn(
               "w-full min-w-0 rounded-2xl border px-3 py-2 shadow-sm",

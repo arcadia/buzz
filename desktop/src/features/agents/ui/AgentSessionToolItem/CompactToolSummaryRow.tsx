@@ -4,11 +4,14 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { useAgentSessionTranscriptVariant } from "../agentSessionTranscriptContext";
 import type { AgentActivityAction } from "../agentSessionTypes";
+import type { ActivityState } from "../agentActivityState";
 import type {
   CompactFileEditSummary,
   CompactToolKind,
 } from "../agentSessionToolSummary";
 import { resolveToolImageSrc } from "../agentSessionUtils";
+import { ActivityElapsed } from "../activityRenderClasses/ActivityElapsed";
+import { ActivityStateMark } from "../activityRenderClasses/ActivityStateMark";
 import {
   ActivityRowLabel,
   splitActivityRowLabel,
@@ -16,7 +19,7 @@ import {
 } from "../activityRenderClasses/ActivityRow";
 
 export function compactSummaryTone() {
-  return "text-muted-foreground/60 transition-colors group-hover/row:text-foreground group-open:text-foreground";
+  return "text-muted-foreground transition-colors group-hover/row:text-foreground group-open:text-foreground";
 }
 
 export function CompactToolSummaryRow({
@@ -26,6 +29,8 @@ export function CompactToolSummaryRow({
   kind,
   label,
   preview,
+  startedAt,
+  state,
   thumbnailSrc,
 }: {
   action: AgentActivityAction | null;
@@ -34,6 +39,9 @@ export function CompactToolSummaryRow({
   kind: CompactToolKind;
   label: string;
   preview: string | null;
+  /** ISO start for the live elapsed readout on an in-flight step. */
+  startedAt: string;
+  state: ActivityState;
   thumbnailSrc: string | null;
 }) {
   const [thumbnailFailed, setThumbnailFailed] = React.useState(false);
@@ -47,13 +55,24 @@ export function CompactToolSummaryRow({
   const actionLabel = fileEditSummary
     ? null
     : getCompactToolActionLabel(action, kind, label, preview);
+  const emphasis =
+    state.state === "failed"
+      ? ("failed" as const)
+      : state.state === "running"
+        ? ("live" as const)
+        : ("normal" as const);
 
   return (
     <>
+      <ActivityStateMark state={state} />
       {fileEditSummary ? (
-        <CompactFileEditSummaryView summary={fileEditSummary} />
+        <CompactFileEditSummaryView
+          emphasis={emphasis}
+          summary={fileEditSummary}
+        />
       ) : actionLabel ? (
         <ActivityRowLabel
+          emphasis={emphasis}
           object={actionLabel.object}
           openToneScope="tool"
           title={actionLabel.title}
@@ -92,15 +111,26 @@ export function CompactToolSummaryRow({
           {preview}
         </span>
       ) : null}
-      {duration ? (
-        <span className={cn("shrink-0 text-xs", mutedTone)}>{duration}</span>
-      ) : null}
-      <ChevronDown
-        className={cn(
-          "h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180",
-          mutedTone,
-        )}
-      />
+      {/* Meta column: elapsed/duration and the caret share one right-hand
+          edge so a run of rows reads as a column rather than ragged text. */}
+      <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        {state.state === "running" ? (
+          <ActivityElapsed
+            className="text-xs tabular-nums text-muted-foreground"
+            startedAt={startedAt}
+          />
+        ) : duration ? (
+          <span className={cn("text-xs tabular-nums", mutedTone)}>
+            {duration}
+          </span>
+        ) : null}
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180",
+            mutedTone,
+          )}
+        />
+      </span>
     </>
   );
 }
@@ -139,13 +169,16 @@ function getCompactToolActionLabel(
 }
 
 function CompactFileEditSummaryView({
+  emphasis,
   summary,
 }: {
+  emphasis: "normal" | "live" | "failed";
   summary: CompactFileEditSummary;
 }) {
   return (
     <ActivityRowLabel
       className="max-w-72"
+      emphasis={emphasis}
       object={summary.filename}
       openToneScope="tool"
       stats={{
