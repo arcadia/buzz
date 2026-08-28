@@ -22,8 +22,8 @@ type PermissionItem = Extract<TranscriptItem, { type: "lifecycle" }>;
 
 /**
  * Split the permission item's text into the request description lines and the
- * options line.  The text is newline-joined by describePermissionRequest:
- *   [request title?] [toolCallId?] ["Options: ..."]
+ * options line. The text is newline-joined by describePermissionRequest:
+ *   [request title?] ["Options: ..."]
  * We surface the options line separately so the render can style it distinctly
  * — and so it can be dropped entirely once the options are offered as buttons,
  * where restating them as prose would just be noise.
