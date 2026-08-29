@@ -129,3 +129,11 @@ tokio = { version = "1", features = ["test-util"] }
 # The relay's media validation, so the snapshot-sharing tests can prove the
 # full export → sanitize → relay-accept → import contract end to end.
 buzz_media_pkg = { package = "buzz-media", path = "../../crates/buzz-media" }
+
+# Windows/MSVC: cmake derives CMAKE_BUILD_TYPE from cargo's OPT_LEVEL/DEBUG, so a
+# dev build compiles opus against the debug CRT (_DEBUG + /MDd) while rustc links
+# the release CRT -> LNK2001 __imp__CrtDbgReportW. Build this C dep optimized so
+# both sides agree on the CRT.
+[profile.dev.package.audiopus_sys]
+opt-level = 2
+debug = false
