@@ -126,11 +126,30 @@ class SettingsPage extends HookConsumerWidget {
             _ConnectionSection(
               identityRecoveryPageBuilder: identityRecoveryPageBuilder,
             ),
-            if (packageInfo.hasData)
-              _VersionFooter(
-                version: packageInfo.data!.version,
-                buildNumber: packageInfo.data!.buildNumber,
-              ),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppListCard(
+                  verticalPadding: Grid.twelve,
+                  children: [
+                    AppListRow(
+                      title: 'Open source licenses',
+                      trailing: const _RowChevron(),
+                      onTap: () => showLicensePage(
+                        context: context,
+                        applicationName: 'Buzz',
+                        applicationVersion: packageInfo.data?.version,
+                      ),
+                    ),
+                  ],
+                ),
+                if (packageInfo.hasData)
+                  _VersionFooter(
+                    version: packageInfo.data!.version,
+                    buildNumber: packageInfo.data!.buildNumber,
+                  ),
+              ],
+            ),
           ],
         ),
       ),

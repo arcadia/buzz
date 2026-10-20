@@ -7,6 +7,22 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.mikepenz.aboutlibraries.plugin.android")
+}
+
+aboutLibraries {
+    collect {
+        includeTestVariants = false
+        fetchRemoteLicense = true
+    }
+    license {
+        // Keep upstream notice text, including project-specific notices.
+        mapLicensesToSpdx = false
+    }
+    library {
+        // Flutter's own license collector already lists the engine's notices.
+        exclusionPatterns.add(Regex("io\\.flutter:.*").toPattern())
+    }
 }
 
 val uploadKeystorePath = providers.environmentVariable("BUZZ_ANDROID_UPLOAD_KEYSTORE_PATH").orNull

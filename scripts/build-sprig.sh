@@ -37,8 +37,14 @@
 #   buzz-dev-mcp
 #   README.md
 #   sprig.json        { version, git_sha, target, binaries: [{name, sha256, size}] }
+#   LICENSE
+#   licenses/         sprig-native.txt dependency notices and their README.md
 
 set -euo pipefail
+
+# Check generated notices before doing an expensive build or publishing a
+# prebuilt binary. Text mode tolerates Git's CRLF checkouts on Windows.
+python3 scripts/check-distribution-notices.py
 
 VERSION="${1:-${VERSION:-0.0.0-dev}}"
 HOST_TARGET="$(rustc -vV | sed -n 's|host: ||p')"
@@ -104,6 +110,10 @@ sha256_of() {
 
 cp "${BIN_DIR}/${BUNDLE_BIN}" "${STAGING}/${BUNDLE_BIN}"
 chmod 0755 "${STAGING}/${BUNDLE_BIN}"
+cp LICENSE "${STAGING}/LICENSE"
+mkdir -p "${STAGING}/licenses"
+cp licenses/sprig-native.txt "${STAGING}/licenses/sprig-native.txt"
+cp licenses/README.md "${STAGING}/licenses/README.md"
 if command -v strip >/dev/null 2>&1; then
     strip "${STAGING}/${BUNDLE_BIN}" 2>/dev/null || true
 fi

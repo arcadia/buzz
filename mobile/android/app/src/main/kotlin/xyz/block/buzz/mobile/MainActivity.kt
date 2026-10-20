@@ -134,11 +134,13 @@ class MainActivity : FlutterFragmentActivity() {
     private var hapticsPlugin: HapticsPlugin? = null
     private var hostedHpkePlugin: HostedHpkePlugin? = null
     private var identityFilePlugin: IdentityFilePlugin? = null
+    private var nativeLicensesPlugin: NativeLicensesPlugin? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         hostedHpkePlugin = HostedHpkePlugin(flutterEngine.dartExecutor.binaryMessenger)
         identityFilePlugin = IdentityFilePlugin(this, flutterEngine.dartExecutor.binaryMessenger)
+        nativeLicensesPlugin = NativeLicensesPlugin(this, flutterEngine.dartExecutor.binaryMessenger)
         hapticsPlugin = HapticsPlugin(this, flutterEngine.dartExecutor.binaryMessenger)
 
         huddleMediaPlugin = HuddleMediaPlugin(
@@ -216,6 +218,8 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onDestroy() {
         identityFilePlugin?.dispose()
         identityFilePlugin = null
+        nativeLicensesPlugin?.dispose()
+        nativeLicensesPlugin = null
         hostedHpkePlugin?.dispose()
         hostedHpkePlugin = null
         hapticsPlugin?.dispose()

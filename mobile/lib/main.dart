@@ -6,6 +6,7 @@ import 'app.dart';
 import 'features/age_gate/age_signal_push_bootstrap.dart';
 import 'features/invites/invite_join_provider.dart';
 import 'shared/push/push_bridge.dart';
+import 'shared/licenses/native_licenses.dart';
 import 'shared/relay/relay_closed_policy.dart';
 import 'shared/theme/theme_provider.dart';
 
@@ -13,6 +14,7 @@ void main() => runBuzzApp(const App());
 
 Future<void> runBuzzApp(Widget app) async {
   WidgetsFlutterBinding.ensureInitialized();
+  registerNativeLicenses();
   installBuzzPushMethodHandler();
   await syncPendingBuzzPushNotificationResponse();
 

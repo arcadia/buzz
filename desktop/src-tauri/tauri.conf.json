@@ -52,6 +52,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "../../LICENSE": "licenses/LICENSE",
+      "../../licenses/desktop-native.txt": "licenses/desktop-native.txt",
+      "../../licenses/speech-native.txt": "licenses/speech-native.txt",
+      "../../licenses/README.md": "licenses/README.md",
+      "resources/pocket-voices/NOTICE.md": "licenses/pocket-voices-NOTICE.md"
+    },
     "externalBin": [
       "binaries/buzz-acp",
       "binaries/buzz-agent",

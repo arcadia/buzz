@@ -1,0 +1,214 @@
+{
+  "sherpa_onnx_version": "1.13.4",
+  "components": [
+    {
+      "name": "sherpa-onnx",
+      "version": "v1.13.4",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.4",
+      "license_url": "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v1.13.4/LICENSE",
+      "file": "licenses/speech/sherpa-onnx.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "name": "piper-phonemize",
+      "version": "f3ff95afc03640bc1399e113e83361192a2fafb4",
+      "source": "https://github.com/csukuangfj/piper-phonemize/tree/f3ff95afc03640bc1399e113e83361192a2fafb4",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/piper-phonemize/f3ff95afc03640bc1399e113e83361192a2fafb4/LICENSE.md",
+      "file": "licenses/speech/piper-phonemize.txt",
+      "sha256": "13746d509d74e55ea2265fbef204bb7cdbf84a8315b0207e988326cb54387028"
+    },
+    {
+      "name": "piper-uni-algo",
+      "version": "f3ff95afc03640bc1399e113e83361192a2fafb4",
+      "source": "https://github.com/csukuangfj/piper-phonemize/tree/f3ff95afc03640bc1399e113e83361192a2fafb4",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/piper-phonemize/f3ff95afc03640bc1399e113e83361192a2fafb4/licenses/uni-algo/LICENSE.md",
+      "file": "licenses/speech/piper-uni-algo.txt",
+      "sha256": "c55648b02873556d6ab2de14938998101fda3a0f293337542af9196435def318"
+    },
+    {
+      "name": "espeak-ng",
+      "version": "ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "source": "https://github.com/csukuangfj/espeak-ng/tree/ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING",
+      "file": "licenses/speech/espeak-ng.txt",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "attribution": "eSpeak was created by Jonathan Duddington. eSpeak NG is maintained by Reece H. Dunn and contributors; see the README at the pinned source revision."
+    },
+    {
+      "name": "ucd-tools",
+      "version": "ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "source": "https://github.com/csukuangfj/espeak-ng/tree/ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/src/ucd-tools/COPYING",
+      "file": "licenses/speech/ucd-tools.txt",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "name": "ucd-data",
+      "version": "ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "source": "https://github.com/csukuangfj/espeak-ng/tree/ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/src/ucd-tools/COPYING.UCD",
+      "file": "licenses/speech/ucd-data.txt",
+      "sha256": "be029c50df83105a810e391778b6edcb522d6cb4b4e142332aca54437a499bf7"
+    },
+    {
+      "name": "kaldi-decoder",
+      "version": "v0.3.0",
+      "source": "https://github.com/k2-fsa/kaldi-decoder/tree/v0.3.0",
+      "license_url": "https://raw.githubusercontent.com/k2-fsa/kaldi-decoder/v0.3.0/LICENSE",
+      "file": "licenses/speech/kaldi-decoder.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "name": "kaldi-native-fbank",
+      "version": "v1.22.3",
+      "source": "https://github.com/csukuangfj/kaldi-native-fbank/tree/v1.22.3",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/kaldi-native-fbank/v1.22.3/LICENSE",
+      "file": "licenses/speech/kaldi-native-fbank.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "name": "kissfft",
+      "version": "febd4caeed32e33ad8b2e0bb5ea77542c40f18ec",
+      "source": "https://github.com/mborgerding/kissfft/tree/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec",
+      "license_url": "https://raw.githubusercontent.com/mborgerding/kissfft/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec/COPYING",
+      "file": "licenses/speech/kissfft.txt",
+      "sha256": "a2840585f8411be8e6826a31ef15ae65c950bd74a2437a73b013398a934ad0c6"
+    },
+    {
+      "name": "openfst",
+      "version": "v1.8.5-2026-04-11",
+      "source": "https://github.com/csukuangfj/openfst/tree/v1.8.5-2026-04-11",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/openfst/v1.8.5-2026-04-11/COPYING",
+      "file": "licenses/speech/openfst.txt",
+      "sha256": "4300529197035fd3452350718a0b8cee984e9412c9932d7f35fcde849fc97a4b"
+    },
+    {
+      "name": "simple-sentencepiece",
+      "version": "v0.7",
+      "source": "https://github.com/pkufool/simple-sentencepiece/tree/v0.7",
+      "license_url": "https://raw.githubusercontent.com/pkufool/simple-sentencepiece/v0.7/LICENSE",
+      "file": "licenses/speech/simple-sentencepiece.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "name": "hclust-cpp",
+      "version": "2026-02-25",
+      "source": "https://github.com/csukuangfj/hclust-cpp/tree/2026-02-25",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/hclust-cpp/2026-02-25/LICENSE",
+      "file": "licenses/speech/hclust-cpp.txt",
+      "sha256": "e361d842da1d290351860ad6dcce2673a1e42e4f873a3ae1ff4eb92c6adaa882"
+    },
+    {
+      "name": "nlohmann-json",
+      "version": "v3.12.0",
+      "source": "https://github.com/nlohmann/json/tree/v3.12.0",
+      "license_url": "https://raw.githubusercontent.com/nlohmann/json/v3.12.0/LICENSE.MIT",
+      "file": "licenses/speech/nlohmann-json.txt",
+      "sha256": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603"
+    },
+    {
+      "name": "asio",
+      "version": "asio-1-24-0",
+      "source": "https://github.com/chriskohlhoff/asio/tree/asio-1-24-0",
+      "license_url": "https://raw.githubusercontent.com/chriskohlhoff/asio/asio-1-24-0/asio/LICENSE_1_0.txt",
+      "file": "licenses/speech/asio.txt",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+    },
+    {
+      "name": "websocketpp",
+      "version": "b9aeec6eaf3d5610503439b4fae3581d9aff08e8",
+      "source": "https://github.com/zaphoyd/websocketpp/tree/b9aeec6eaf3d5610503439b4fae3581d9aff08e8",
+      "license_url": "https://raw.githubusercontent.com/zaphoyd/websocketpp/b9aeec6eaf3d5610503439b4fae3581d9aff08e8/COPYING",
+      "file": "licenses/speech/websocketpp.txt",
+      "sha256": "5ba81a1ed402517dce2581fa2d4042baf6a9c8ca0fe94fa6a7043ce6ab23064f"
+    },
+    {
+      "name": "onnxruntime",
+      "version": "v1.27.0",
+      "source": "https://github.com/microsoft/onnxruntime/tree/v1.27.0",
+      "license_url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.27.0/LICENSE",
+      "file": "licenses/speech/onnxruntime.txt",
+      "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+    },
+    {
+      "name": "onnxruntime-third-party",
+      "version": "v1.27.0",
+      "source": "https://github.com/microsoft/onnxruntime/tree/v1.27.0",
+      "license_url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.27.0/ThirdPartyNotices.txt",
+      "file": "licenses/speech/onnxruntime-third-party.txt",
+      "sha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2"
+    },
+    {
+      "name": "Eigen COPYING.MPL2",
+      "version": "5.0.1",
+      "source": "https://gitlab.com/libeigen/eigen/-/tree/5.0.1",
+      "license_url": "https://gitlab.com/libeigen/eigen/-/raw/5.0.1/COPYING.MPL2",
+      "file": "licenses/speech/eigen-COPYING.MPL2.txt",
+      "sha256": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172"
+    },
+    {
+      "name": "Eigen COPYING.BSD",
+      "version": "5.0.1",
+      "source": "https://gitlab.com/libeigen/eigen/-/tree/5.0.1",
+      "license_url": "https://gitlab.com/libeigen/eigen/-/raw/5.0.1/COPYING.BSD",
+      "file": "licenses/speech/eigen-COPYING.BSD.txt",
+      "sha256": "51928dce36213c5333ba3172e847d735d4c6e9b7ff2722a326c49067155b82eb"
+    },
+    {
+      "name": "Eigen COPYING.README",
+      "version": "5.0.1",
+      "source": "https://gitlab.com/libeigen/eigen/-/tree/5.0.1",
+      "license_url": "https://gitlab.com/libeigen/eigen/-/raw/5.0.1/COPYING.README",
+      "file": "licenses/speech/eigen-COPYING.README.txt",
+      "sha256": "db640ff2bd90c6abd6a4d3fbb351e0ee4d555417cf840492054d1cbb2ea85644"
+    },
+    {
+      "name": "kissfft-bsd",
+      "version": "febd4caeed32e33ad8b2e0bb5ea77542c40f18ec",
+      "source": "https://github.com/mborgerding/kissfft/tree/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec",
+      "license_url": "https://raw.githubusercontent.com/mborgerding/kissfft/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec/LICENSES/BSD-3-Clause",
+      "file": "licenses/speech/kissfft-bsd.txt",
+      "sha256": "4d6bcab46f27d6d0c878e8305d4bdcfe040d52bf6656b9771f04c9fb9902c0ed"
+    },
+    {
+      "name": "espeak-apache",
+      "version": "ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "source": "https://github.com/csukuangfj/espeak-ng/tree/ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING.APACHE",
+      "file": "licenses/speech/espeak-apache.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "name": "espeak-bsd2",
+      "version": "ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "source": "https://github.com/csukuangfj/espeak-ng/tree/ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING.BSD2",
+      "file": "licenses/speech/espeak-bsd2.txt",
+      "sha256": "a8b0c1c7d7af6c0415c068be8cf373799d1a42b0707b79dc4ccfcaf593cd902d"
+    },
+    {
+      "name": "espeak-ucd",
+      "version": "ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "source": "https://github.com/csukuangfj/espeak-ng/tree/ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "license_url": "https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING.UCD",
+      "file": "licenses/speech/espeak-ucd.txt",
+      "sha256": "be029c50df83105a810e391778b6edcb522d6cb4b4e142332aca54437a499bf7"
+    },
+    {
+      "name": "eigen-apache",
+      "version": "5.0.1",
+      "source": "https://gitlab.com/libeigen/eigen/-/tree/5.0.1",
+      "license_url": "https://gitlab.com/libeigen/eigen/-/raw/5.0.1/COPYING.APACHE",
+      "file": "licenses/speech/eigen-apache.txt",
+      "sha256": "03379001a7b12a2ec997a25554247d985270b353c10d5bafee9ac8d6519820b7"
+    },
+    {
+      "name": "eigen-minpack",
+      "version": "5.0.1",
+      "source": "https://gitlab.com/libeigen/eigen/-/tree/5.0.1",
+      "license_url": "https://gitlab.com/libeigen/eigen/-/raw/5.0.1/COPYING.MINPACK",
+      "file": "licenses/speech/eigen-minpack.txt",
+      "sha256": "c87b7f8ee88f6195e91743820c00354833583aef091b72e2d4a49c8e28e798a0"
+    }
+  ]
+}

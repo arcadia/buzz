@@ -90,6 +90,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.getTopLeft(version).dy, greaterThan(beforeScroll));
       expect(tester.takeException(), isNull);
+      if (buildNumber == '432') {
+        final licenses = find.text('Open source licenses');
+        await tester.scrollUntilVisible(licenses, 100);
+        await tester.tap(licenses);
+        await tester.pumpAndSettle();
+        expect(find.byType(LicensePage), findsOneWidget);
+        expect(find.text('Buzz'), findsWidgets);
+        expect(tester.takeException(), isNull);
+      }
     });
   }
 

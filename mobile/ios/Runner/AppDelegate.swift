@@ -50,6 +50,7 @@ import os.log
   private var hostedHpkeChannel: FlutterMethodChannel?
   private var browserAuthBridge: BuzzBrowserAuthBridge?
   private var huddleMediaPlugin: HuddleMediaPlugin?
+  private var nativeLicensesPlugin: NativeLicensesPlugin?
 
   override func application(
     _ application: UIApplication,
@@ -68,6 +69,7 @@ import os.log
     }
 
     let messenger = engineBridge.applicationRegistrar.messenger()
+    nativeLicensesPlugin = NativeLicensesPlugin(messenger: messenger)
     identityFilePlugin = IdentityFilePlugin(messenger: messenger)
     browserAuthBridge = BuzzBrowserAuthBridge(messenger: messenger)
     hostedHpkeChannel = FlutterMethodChannel(name: "buzz/hosted_hpke", binaryMessenger: messenger)
