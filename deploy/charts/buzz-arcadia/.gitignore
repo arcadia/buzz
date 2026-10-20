@@ -1,0 +1,7 @@
+# Commit only the reviewed upstream package needed by private Argo repo-servers.
+# test-arcadia-chart.py checks it against the sibling upstream source.
+charts/*
+!charts/buzz-0.1.11.tgz
+# Real environment records are private (cloud-config-infrastructures); only the
+# dummy ci/*-values.example.yaml fixtures belong in this public repository.
+ci/*-values.yaml

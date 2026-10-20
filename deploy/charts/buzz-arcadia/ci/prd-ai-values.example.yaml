@@ -1,0 +1,60 @@
+# prd-ai rendering fixture. Every identifier below is a DUMMY.
+#
+# The real prd-ai record is private, in cloud-config-infrastructures branch
+# `ai`: the cluster globals in prd/ai/global-helm-values-patch.yaml and this
+# chart's values in prd/ai/buzz/values.yaml (see dev-ai-values.example.yaml).
+# Promotion to prd is gated: AIFM ticket + approved ACM CR before the
+# Application merges, deployer != implementer, SRE review, the signed privacy
+# review and soak evidence. The image tag is pinned by hand in that PR; no CI
+# job writes the prd branch.
+#
+# ── cluster globals (from global-helm-values-patch.yaml in the cluster) ──────
+account: "222222222222"
+region: "us-east-1"
+clusterName: "prd-ai"
+infrastructure: "example-prd"
+domainCertArn: "arn:aws:acm:us-east-1:222222222222:certificate/00000000-0000-0000-0000-000000000000"
+domainHostedZone: "prd-ai.example.com"
+
+# ── the environment's chart values (buzz/values.yaml in the cluster) ─────────
+rds:
+  claimName: buzz
+  dbName: buzz
+  dbInstanceClass: db.r6g.large
+  multiAZ: true
+  deletionProtection: true
+  skipFinalSnapshot: false
+  subnetIds:
+    - subnet-00000000000000004
+    - subnet-00000000000000005
+    - subnet-00000000000000006
+  # RFC 5737 documentation range.
+  cidrBlocks: &vpcCidrs
+    - 198.51.100.0/25
+    - 198.51.100.128/25
+  jiraTicketNumber: ""
+
+networkPolicy:
+  allowedIngressCidrs: *vpcCidrs
+
+buzz:
+  relayUrl: "wss://buzz.prd-ai.example.com"
+  ownerPubkey: "0000000000000000000000000000000000000000000000000000000000000000"
+  # 2 replicas require BUZZ_GIT_HOOK_HMAC_SECRET (provisioned in SSM by the
+  # pre-flight) and turn huddle audio off automatically; buzz-pubsub fan-out is
+  # via Redis.
+  replicaCount: 2
+  image:
+    repository: "222222222222.dkr.ecr.us-east-1.amazonaws.com/buzz/relay"
+    tag: "main-0000000000"
+
+  # Retention / data-handling is deliberately NOT overridden here. The chart's
+  # `buzz.relay.extraEnv` defaults are already prd-grade (BUZZ_EPHEMERAL_TTL_OVERRIDE=604800,
+  # BUZZ_AUDIT_ENABLED=true, uploadRecords=false; media reads always
+  # authenticate in the relay) and render into this environment unchanged.
+  #
+  # Helm REPLACES lists rather than merging them, so setting `relay.extraEnv`
+  # here would drop every default in one go, including the startup-FATAL
+  # BUZZ_GIT_CONFORMANCE_PROBE=false and the controls awaiting the privacy
+  # review. If prd ever needs a different value, copy the WHOLE list out of
+  # values.yaml and change the one entry.

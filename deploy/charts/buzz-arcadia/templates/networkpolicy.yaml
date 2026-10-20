@@ -1,0 +1,62 @@
+{{- include "buzz-arcadia.validate" . -}}
+{{- if .Values.networkPolicy.enabled }}
+# Ingress-only policies scoped to the environment's real VPC CIDRs. With the AWS
+# VPC CNI, Pods get VPC addresses, so one CIDR set covers both the ALB ENIs
+# (:3000 traffic, :8080 health checks) and in-cluster callers (:9102 Alloy
+# scrape, the bridge's in-cluster dial of :3000).
+#
+# policyTypes is Ingress only: egress stays unrestricted so the relay can reach
+# RDS, Redis, and DNS without a second CIDR inventory to keep in sync.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "buzz-arcadia.fullname" . }}-relay
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buzz-arcadia.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "buzz-arcadia.relaySelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.allowedIngressCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        {{- range .Values.networkPolicy.relayPorts }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+{{- if .Values.redis.enabled }}
+---
+# Redis takes traffic from the relay Pods only — nothing else in the namespace
+# (notably not the bridge, which never speaks to buzz-pubsub).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "buzz-arcadia.redisFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buzz-arcadia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "buzz-arcadia.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "buzz-arcadia.relaySelectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.redis.port }}
+          protocol: TCP
+{{- end }}
+{{- end }}

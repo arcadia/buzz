@@ -1,0 +1,51 @@
+{{- include "buzz-arcadia.validate" . -}}
+{{- if .Values.ingress.enabled }}
+{{- $host := include "buzz-arcadia.relayHost" . -}}
+# Internal ALB (decision D8). Rendered here rather than by the subchart so the
+# annotations can be built from the injected cluster globals (domainCertArn ->
+# certificate-arn, domainHostedZone -> host + external-dns record); the
+# subchart's own ingress.yaml is kept disabled (buzz.ingress.enabled: false).
+#
+# First WebSocket workload behind an ALB on these clusters — SRE sign-off
+# required, NLB raw-manifest fallback pre-authored (N8a).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "buzz-arcadia.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buzz-arcadia.labels" . | nindent 4 }}
+  annotations:
+    alb.ingress.kubernetes.io/scheme: {{ .Values.ingress.scheme }}
+    alb.ingress.kubernetes.io/target-type: {{ .Values.ingress.targetType }}
+    alb.ingress.kubernetes.io/listen-ports: {{ .Values.ingress.listenPorts | quote }}
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.domainCertArn | quote }}
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    # Long-lived WebSockets: the ALB default idle timeout is 60 s.
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds={{ .Values.ingress.idleTimeoutSeconds }}
+    # Health checks hit the relay's health port, never "/" on :3000 — the relay
+    # resolves its community from the Host header before the upgrade and 404s an
+    # unmapped host, and an ALB health check sends the target IP as Host.
+    alb.ingress.kubernetes.io/healthcheck-port: {{ .Values.buzz.service.healthPort | quote }}
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.ingress.healthcheckPath | quote }}
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/success-codes: {{ .Values.ingress.successCodes | quote }}
+    external-dns.alpha.kubernetes.io/hostname: {{ $host | quote }}
+    external-dns.alpha.kubernetes.io/ttl: {{ .Values.ingress.externalDnsTtl | quote }}
+    {{- with .Values.ingress.extraAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "buzz-arcadia.relayFullname" . }}
+                port:
+                  number: {{ .Values.buzz.service.port }}
+{{- end }}

@@ -1,0 +1,6 @@
+dependencies:
+- name: buzz
+  repository: file://../buzz
+  version: 0.1.11
+digest: sha256:f7ecf9837ab5cd755b8d77811a550b88032bf32ddefb955d89b338006b117239
+generated: "2026-10-20T14:19:55.8164673-04:00"

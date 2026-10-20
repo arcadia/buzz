@@ -1,0 +1,50 @@
+# dev-ai rendering fixture. Every identifier below is a DUMMY.
+#
+# The real dev-ai record is private, in cloud-config-infrastructures branch
+# `ai-dev`: the cluster globals in preprd/dev-ai/global-helm-values-patch.yaml
+# and this chart's values in preprd/dev-ai/buzz/values.yaml. Do not copy real
+# values into this repository; ci/*-values.yaml is git-ignored so a composed
+# real file cannot be committed by accident.
+#
+# The tests render this file. To render the real environment instead:
+#
+#   python deploy/scripts/env-values.py <cci>/preprd/dev-ai > /secure/path/dev-ai-values.yaml
+#   BUZZ_ENV_DIR=<cci>/preprd/dev-ai python deploy/scripts/test-arcadia-chart.py
+#
+# ── cluster globals (from global-helm-values-patch.yaml in the cluster) ──────
+account: "111111111111"
+region: "us-east-1"
+clusterName: "dev-ai"
+infrastructure: "example-dev"
+domainCertArn: "arn:aws:acm:us-east-1:111111111111:certificate/00000000-0000-0000-0000-000000000000"
+domainHostedZone: "dev-ai.example.com"
+
+# ── the environment's chart values (buzz/values.yaml in the cluster) ─────────
+rds:
+  claimName: buzz
+  dbName: buzz
+  dbInstanceClass: db.m6g.large
+  multiAZ: false
+  deletionProtection: true
+  skipFinalSnapshot: false
+  subnetIds:
+    - subnet-00000000000000001
+    - subnet-00000000000000002
+    - subnet-00000000000000003
+  # RFC 5737 documentation range.
+  cidrBlocks: &vpcCidrs
+    - 192.0.2.0/25
+    - 192.0.2.128/25
+  jiraTicketNumber: ""
+
+networkPolicy:
+  allowedIngressCidrs: *vpcCidrs
+
+buzz:
+  relayUrl: "wss://buzz.dev-ai.example.com"
+  # All-zero placeholders: the chart refuses to render them.
+  ownerPubkey: "0000000000000000000000000000000000000000000000000000000000000000"
+  replicaCount: 1
+  image:
+    repository: "111111111111.dkr.ecr.us-east-1.amazonaws.com/buzz/relay"
+    tag: "main-0000000000"
