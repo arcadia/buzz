@@ -1075,8 +1075,8 @@ License: CDLA-Permissive-2.0
 webpki-roots 0.26.11
 Source: https://crates.io/api/v1/crates/webpki-roots/0.26.11/download
 Project: https://github.com/rustls/webpki-roots
-webpki-roots 1.0.7
-Source: https://crates.io/api/v1/crates/webpki-roots/1.0.7/download
+webpki-roots 1.0.10
+Source: https://crates.io/api/v1/crates/webpki-roots/1.0.10/download
 Project: https://github.com/rustls/webpki-roots
 
 # Community Data License Agreement - Permissive - Version 2.0
@@ -1667,8 +1667,8 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 --------------------------------------------------------------------------------
 License: ISC
 
-rustls-webpki 0.103.15
-Source: https://crates.io/api/v1/crates/rustls-webpki/0.103.15/download
+rustls-webpki 0.103.16
+Source: https://crates.io/api/v1/crates/rustls-webpki/0.103.16/download
 Project: https://github.com/rustls/webpki
 
 Except as otherwise noted, this project is licensed under the following

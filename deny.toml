@@ -43,6 +43,13 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant via buzz-mesh-smoke → mesh-llm → keyring 4 → secret-service 5 → zbus 5; unmaintained, not vulnerable" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names via buzz-mesh-smoke → mesh-llm → keyring 4 → secret-service 5 → zbus 5; unmaintained, not vulnerable" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via buzz-mesh-smoke → mesh-llm → keyring 4 → secret-service 5 → zbus 5; unmaintained, not vulnerable" },
+    # webpki-roots 0.26.11 bundles no roots: it is the semver-trick shim
+    # `pub use parent::TLS_SERVER_ROOTS` over webpki-roots 1, locked at 1.0.10,
+    # which drops emSign ECC Root CA - G3. No 0.26.x release will carry a fix.
+    # Consumers: tokio-tungstenite 0.28 (nostr-sdk → async-wsocket) and ureq 2
+    # (sherpa-onnx-sys build). The id also covers webpki-roots 1.x, so the
+    # bans.deny entries below keep 1.x patched and forbid pre-shim 0.26 releases.
+    { id = "RUSTSEC-2026-0381", reason = "only webpki-roots 0.26.11, a re-export of the patched webpki-roots 1.0.10; bans.deny forbids every affected release that bundles roots" },
 ]
 
 [licenses]
@@ -120,4 +127,6 @@ multiple-versions = "warn"
 wildcards = "allow"
 deny = [
     { name = "ringbuf", version = "<0.5.2", wrappers = ["neteq"], reason = "only audited NetEQ may declare this unused vulnerable dependency; all other consumers must use a patched release" },
+    { name = "webpki-roots", version = "<0.26.11", reason = "affected by RUSTSEC-2026-0381 and bundles its own roots; only the 0.26.11 re-export shim is exempt" },
+    { name = "webpki-roots", version = ">=1.0.0, <1.0.10", reason = "affected by RUSTSEC-2026-0381, whose id is ignored only for the 0.26.11 re-export shim" },
 ]
