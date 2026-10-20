@@ -117,6 +117,8 @@ jobs:
           scripts/test-postgres-test-wrapper.sh
       - name: Release workflow source contract
         run: scripts/test-release-ref-contract.sh
+      - name: Sprig rolling release publication
+        run: python3 scripts/test-sprig-rolling-release.py
       - name: Relay image eligibility contract
         run: scripts/test-relay-image-eligibility-workflow.sh
       - name: Desktop release candidate contract
