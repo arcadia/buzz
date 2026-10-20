@@ -310,6 +310,88 @@ async function mountStrictMode(Comp) {
  * `pendingImetaForPersistRef.current = saved.pendingImeta` line from the
  * production hook's effect body causes imageCount 1 → 0 and this test fails.
  */
+test("draft restoration waits for the editor before consuming attachments or persisting", async () => {
+  setupStore("pubkey-delayed-editor");
+  const refs = [{ displayName: "Ada", pubkey: "aaaaaaaa", isAgent: true }];
+  persistDraftEntry(
+    "delayed-editor",
+    "hello @Ada",
+    "delayed-editor",
+    [IMG_A],
+    [],
+    refs,
+  );
+  let editorReady = false;
+  let editorContent = "";
+  let activeRefs = [];
+  let media = [];
+  let restoreCount = 0;
+  let queueTakeCount = 0;
+  let persistCount = 0;
+  const spoileredRef = { current: new Set() };
+  function HarnessComposer() {
+    useDraftPersistLifecycle({
+      effectiveDraftKey: "delayed-editor",
+      channelId: "delayed-editor",
+      editorReady,
+      loadDraft: loadDraftEntry,
+      persistDraft: (...args) => {
+        persistCount++;
+        persistDraftEntry(...args);
+      },
+      getMentionRefs: () => activeRefs,
+      restoreMentionRefs: (value) => {
+        activeRefs = [...value];
+      },
+      livePendingImeta: media,
+      setPendingImeta: (value) => {
+        media = value;
+      },
+      takeQueuedAttachmentsForDraft: () => {
+        queueTakeCount++;
+        return [];
+      },
+      setContent: (value) => {
+        restoreCount++;
+        editorContent = value;
+      },
+      clearContent: () => {
+        throw new Error("the saved draft must not be cleared");
+      },
+      setSpoileredAttachmentUrls: () => {},
+      spoileredAttachmentUrlsRef: spoileredRef,
+      syncComposerContentFromEditor: () => editorContent,
+    });
+    return null;
+  }
+  const handle = await mountStrictMode(HarnessComposer);
+  assert.equal(restoreCount, 0);
+  assert.equal(queueTakeCount, 0);
+  assert.equal(persistCount, 0);
+  assert.equal(loadDraftEntry("delayed-editor")?.content, "hello @Ada");
+
+  editorReady = true;
+  await handle.rerender();
+  assert.equal(editorContent, "hello @Ada");
+  assert.deepEqual(activeRefs, refs);
+  assert.deepEqual(media, [IMG_A]);
+  assert.equal(restoreCount, 1);
+  assert.equal(queueTakeCount, 1);
+  await handle.rerender();
+  assert.equal(
+    restoreCount,
+    1,
+    "ordinary renders must not replay a saved draft",
+  );
+
+  editorContent = "edited hello @Ada";
+  await handle.unmount();
+  assert.equal(persistCount, 1);
+  assert.equal(loadDraftEntry("delayed-editor")?.content, "edited hello @Ada");
+  assert.deepEqual(loadDraftEntry("delayed-editor")?.mentionRefs, refs);
+  assert.deepEqual(loadDraftEntry("delayed-editor")?.pendingImeta, [IMG_A]);
+});
+
 test("strictmode_draft_restore_cleanup_preserves_images_via_production_hook", async () => {
   const DRAFT_KEY = "chan-lifecycle-fixed";
   setupStore("pubkey-lifecycle-fixed");

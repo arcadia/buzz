@@ -187,6 +187,9 @@ export function useRichTextEditor({
 
   const editor = useEditor(
     {
+      // Create the editor after React commits. A render can be suspended long
+      // enough for Tiptap to destroy its speculative editor before layout effects.
+      immediatelyRender: false,
       extensions: [
         StarterKit.configure({
           // Use hard breaks (Shift+Enter) — Enter submits the message.

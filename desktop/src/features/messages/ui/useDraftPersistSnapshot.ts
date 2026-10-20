@@ -14,6 +14,8 @@ import {
 type UseDraftPersistLifecycleParams = {
   effectiveDraftKey: string | null | undefined;
   channelId: string | null | undefined;
+  /** Restore and persist only after the composer owns a mounted editor. */
+  editorReady?: boolean;
   /** Load a saved draft from the store. */
   loadDraft: (draftKey: string) => DraftState | undefined;
   /** Persist the current draft to the store (called in effect cleanup). */
@@ -107,6 +109,7 @@ type UseDraftPersistLifecycleResult = {
 export function useDraftPersistLifecycle({
   effectiveDraftKey,
   channelId,
+  editorReady = true,
   loadDraft,
   persistDraft,
   getMentionRefs,
@@ -180,8 +183,9 @@ export function useDraftPersistLifecycle({
   // cleanup always reads the latest value during normal mounted operation.
   pendingImetaForPersistRef.current = livePendingImeta;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: effectiveDraftKey is the sole trigger
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draft identity and editor readiness own restoration
   React.useLayoutEffect(() => {
+    if (!editorReady) return;
     // The outgoing draft is persisted by the cleanup below, which runs before
     // this body on key changes and has the correct outgoing channelId in its
     // closure. Do NOT re-persist prevKey here: channelId in this render
@@ -251,7 +255,7 @@ export function useDraftPersistLifecycle({
         );
       }
     };
-  }, [effectiveDraftKey]);
+  }, [effectiveDraftKey, editorReady]);
 
   const trackAuthoredContent = React.useCallback(
     (content: string) => {
