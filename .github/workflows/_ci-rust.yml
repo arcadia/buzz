@@ -110,7 +110,7 @@ jobs:
     runs-on: windows-latest
     # Windows runners are slow and this compiles the workspace + Tauri crate
     # cold across four steps; budget generously.
-    timeout-minutes: 45
+    timeout-minutes: 60
     if: inputs.lane == 'required' && (github.event_name == 'push' || inputs.rust || inputs.desktop_rust)
     permissions:
       contents: read
