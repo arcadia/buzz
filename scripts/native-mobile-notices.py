@@ -132,8 +132,9 @@ def main() -> None:
         document = ios_notices(args.lock, args.manifest, args.acknowledgements,
                                args.flutter_license)
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n",
-                               encoding="utf-8", newline="\n")
+        # Xcode's /usr/bin/python3 is 3.9, whose Path.write_text has no newline argument.
+        args.output.write_bytes(
+            (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
         print(f"Packaged notices for {len(document['entries'])} locked CocoaPods dependencies")
     else:
         count = check_package(args.package, args.expected)
