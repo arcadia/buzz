@@ -107,6 +107,10 @@ jobs:
   publish:
     name: Publish rolling release
     needs: build
+    # Serialize rolling tag/metadata/assets updates, including manual retries.
+    concurrency:
+      group: sprig-rolling-release
+      cancel-in-progress: false
     if: |
       github.event_name == 'push' && github.ref == 'refs/heads/main'
       || (github.event_name == 'workflow_dispatch' && inputs.publish)
@@ -132,17 +136,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          # Automatic runs (including retries) cannot publish an obsolete main
+          # build. A manual publish explicitly selects the dispatch's ref.
+          SOURCE_POLICY: ${{ github.event_name == 'workflow_dispatch' && 'selected-ref' || 'main' }}
         run: |
-          set -euo pipefail
-          TAG="sprig-latest"
-          TITLE="Sprig (rolling)"
-          NOTES="Rolling Linux build of Sprig (all-in-one buzz-acp + buzz-agent + buzz-dev-mcp), tracking \`main\` (\`${SHA}\`)."
-
-          gh release edit "$TAG" \
-            --prerelease \
-            --title "$TITLE" \
-            --notes "$NOTES"
-          gh release upload "$TAG" dist/* --clobber
+          python3 scripts/publish-sprig-rolling-release.py \
+            --repo "$REPO" --sha "$SHA" --assets-dir dist \
+            --source-policy "$SOURCE_POLICY"
 
   publish-tag:
     name: Publish tagged release
