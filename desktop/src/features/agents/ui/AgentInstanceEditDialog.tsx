@@ -35,12 +35,9 @@ import { EditAgentAdvancedFields } from "./EditAgentAdvancedFields";
 import {
   ADVANCED_FIELDS_MOTION_TRANSITION,
   AUTO_PROVIDER_DROPDOWN_VALUE,
-  BLOCK_BUILD_HIDDEN_PROVIDER_IDS,
-  CUSTOM_PROVIDER_DROPDOWN_VALUE,
   formatRuntimeOptionLabel,
   getDefaultLlmModelLabel,
   getDefaultPersonaRuntime,
-  getPersonaProviderOptions,
   isMissingRequiredDropdownField,
   NO_RUNTIME_DROPDOWN_VALUE,
   PERSONA_FIELD_CONTROL_CLASS,
@@ -80,10 +77,8 @@ import {
   usePersonaModelDiscovery,
 } from "./usePersonaModelDiscovery";
 import { EditAgentProviderModelFields } from "./EditAgentProviderModelFields";
-import {
-  getBakedModelInheritLabel,
-  getBakedProviderInheritLabel,
-} from "./bakedEnvHelpers";
+import { getBakedModelInheritLabel } from "./bakedEnvHelpers";
+import { buildEditAgentProviderField } from "./editAgentProviderField";
 import { getProviderApiKeyEnvVar } from "./agentConfigOptions";
 import { useAgentDialogDefaults } from "./useAgentDialogDefaults";
 import { AgentAiDefaultsNotice } from "./AgentAiDefaults";
@@ -872,38 +867,14 @@ export function AgentInstanceEditDialog({
   });
 
   // Provider field derived state
-  const trimmedProvider = provider.trim();
-  const hideProviderIds = React.useMemo(
-    () =>
-      (bakedEnvKeys ?? []).includes("BUZZ_AGENT_PROVIDER")
-        ? BLOCK_BUILD_HIDDEN_PROVIDER_IDS
-        : new Set<string>(),
-    [bakedEnvKeys],
-  );
-  const providerOptions = getPersonaProviderOptions(
-    trimmedProvider,
-    selectedRuntime?.id ?? "",
-    inheritedProviderDefault.source === "global"
-      ? inheritedProviderDefault.value
-      : "",
-    hideProviderIds,
-  );
-  const providerSelectValue = isCustomProviderEditing
-    ? CUSTOM_PROVIDER_DROPDOWN_VALUE
-    : trimmedProvider || AUTO_PROVIDER_DROPDOWN_VALUE;
-  const providerDropdownOptions: PersonaDropdownOption[] = [
-    ...providerOptions.map((option) => ({
-      label:
-        option.id === "" && inheritedProviderDefault.source === "build"
-          ? getBakedProviderInheritLabel(
-              inheritedProviderDefault.value,
-              providerOptions,
-            )
-          : option.label,
-      value: option.id || AUTO_PROVIDER_DROPDOWN_VALUE,
-    })),
-    { label: "Custom provider...", value: CUSTOM_PROVIDER_DROPDOWN_VALUE },
-  ];
+  const { providerDropdownOptions, providerSelectValue } =
+    buildEditAgentProviderField({
+      bakedEnvKeys,
+      inheritedProviderDefault,
+      isCustomProviderEditing,
+      provider,
+      runtimeId: selectedRuntime?.id ?? "",
+    });
 
   const previewLabel = name.trim() || "Agent name";
   const previewAvatarUrl = avatarUrl.trim() || null;

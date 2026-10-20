@@ -1257,4 +1257,6 @@ pub fn managed_agent_avatar_url(command: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+mod registry_lifecycle_tests;
+#[cfg(test)]
 mod tests;

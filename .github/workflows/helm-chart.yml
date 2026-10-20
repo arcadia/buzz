@@ -50,7 +50,7 @@ env:
   # the install ref documented in deploy/charts/buzz/README.md). Set
   # GHCR_CHART_REPO as a repo variable to override (e.g., forks pushing to their
   # own namespace without editing this file) — mirrors docker.yml's GHCR_IMAGE.
-  CHART_REPO: ${{ vars.GHCR_CHART_REPO != '' && vars.GHCR_CHART_REPO || 'oci://ghcr.io/block/buzz/charts' }}
+  CHART_REPO: ${{ vars.GHCR_CHART_REPO != '' && vars.GHCR_CHART_REPO || format('oci://ghcr.io/{0}/buzz/charts', github.repository_owner) }}
 
 jobs:
   lint-and-unittest:
