@@ -12,7 +12,10 @@ function withSharedComputeAutoOption(
   options: readonly PersonaModelOption[],
 ): readonly PersonaModelOption[] {
   const modelOptions = options.filter((option) => option.id.trim() !== "");
-  return [{ id: "", label: "Default (auto)" }, ...modelOptions];
+  return [
+    { id: "", label: "Auto (collective when available)" },
+    ...modelOptions,
+  ];
 }
 
 export function relayMeshModelPickerState({
@@ -77,6 +80,7 @@ export function modelDropdownOptions({
     globalModel === undefined
       ? options.map((option) => ({
           label: option.label,
+          description: option.description,
           value: option.id || AUTO_MODEL_DROPDOWN_VALUE,
         }))
       : buildTemplateModelDropdownOptions(

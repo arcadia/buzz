@@ -52,6 +52,10 @@ use crate::managed_agents::{
 
 mod cli_login;
 pub(crate) mod cli_probe;
+mod harness_descriptor;
+pub(crate) use harness_descriptor::{
+    resolve_effective_harness_descriptor, EffectiveHarnessDescriptor,
+};
 
 // ── EffectiveAgentEnv ─────────────────────────────────────────────────────────
 
@@ -93,16 +97,43 @@ pub(crate) fn resolve_effective_agent_env(
     runtime: Option<&KnownAcpRuntime>,
     global: &GlobalAgentConfig,
 ) -> EffectiveAgentEnv {
+    // Look up the harness definition for definition-level env (preset/custom).
+    // Same resolution logic as spawn_agent_child: record runtime id first, then
+    // persona runtime id, then nothing.
+    let harness_def = {
+        let runtime_id = record
+            .runtime
+            .as_deref()
+            .or_else(|| {
+                record.persona_id.as_deref().and_then(|pid| {
+                    personas
+                        .iter()
+                        .find(|p| p.id == pid)
+                        .and_then(|p| p.runtime.as_deref())
+                })
+            })
+            .unwrap_or("");
+        crate::managed_agents::custom_harnesses::lookup_loaded_harness_by_id(runtime_id)
+    };
+
+    resolve_effective_agent_env_with_def(record, personas, runtime, global, harness_def)
+}
+
+/// Inner implementation that accepts a pre-fetched `harness_def` to avoid a
+/// second registry lookup when the caller (e.g. `resolve_effective_harness_descriptor`)
+/// already has the definition in hand.
+fn resolve_effective_agent_env_with_def(
+    record: &ManagedAgentRecord,
+    personas: &[AgentDefinition],
+    runtime: Option<&KnownAcpRuntime>,
+    global: &GlobalAgentConfig,
+    harness_def: Option<std::sync::Arc<crate::managed_agents::custom_harnesses::HarnessDefinition>>,
+) -> EffectiveAgentEnv {
     let effective_command = crate::managed_agents::record_agent_command(record, personas);
 
     // Layer 1: baked build defaults (floor — internal builds only; OSS = empty).
     let mut env = baked_build_env();
 
-    // Layer 2: runtime metadata env vars (model / provider keys derived from
-    // the record's structured fields, with global as fallback).
-    //
-    // Uses the shared resolver to guarantee readiness and spawn agree on the
-    // effective model/provider: agent → persona → global → None.
     let (effective_model, effective_provider) =
         super::global_config::resolve_effective_model_provider(record, personas, global);
 
@@ -111,10 +142,21 @@ pub(crate) fn resolve_effective_agent_env(
             rt.model_env_var,
             rt.provider_env_var,
             rt.provider_locked,
-            effective_model,
-            effective_provider,
+            effective_model.as_deref(),
+            effective_provider.as_deref(),
         ) {
             env.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    // Layer 2b: definition env — the harness author's defaults (e.g. CURSOR_ACP=1).
+    // Applied as a floor below global so user env always wins on collision.
+    // Reserved keys are stripped by the shared `is_reserved_env_key` predicate.
+    if let Some(ref def) = harness_def {
+        for (key, value) in &def.env {
+            if !super::env_vars::is_reserved_env_key(key) {
+                env.insert(key.clone(), value.clone());
+            }
         }
     }
 
@@ -135,10 +177,28 @@ pub(crate) fn resolve_effective_agent_env(
     );
     env.extend(user_env);
 
+    // Single harness-agnostic effort authority (PR #4625): resolve effective
+    // effort over the canonical column AND all env tiers, emit one destination
+    // key. Runs AFTER the layer stack so launch, remote deploy, and the restart
+    // snapshot agree — no double authority, no foreign key, no badge disagreement.
+    super::config_bridge::effort::apply_launch_effort(
+        &mut env,
+        record,
+        runtime,
+        personas,
+        &global.env_vars,
+        harness_def.as_deref(),
+        &baked_build_env(),
+    );
+
     // Buzz shared compute is a native Buzz provider. Translate it to buzz-agent's
     // OpenAI-compatible transport only in the effective runtime environment.
     #[cfg(feature = "mesh-llm")]
-    super::apply_relay_mesh_env(&mut env, effective_provider, effective_model);
+    super::apply_relay_mesh_env(
+        &mut env,
+        effective_provider.as_deref(),
+        effective_model.as_deref(),
+    );
 
     EffectiveAgentEnv {
         env,
@@ -196,6 +256,14 @@ pub enum Requirement {
     /// Git for Windows is missing, so buzz-agent cannot launch buzz-dev-mcp's
     /// Bash-based shell tool. Doctor owns installation and re-checking.
     GitBash,
+    /// A custom harness command that cannot be resolved in the current PATH.
+    /// Displayed as a PATH badge in the harness card and a nudge in the agent
+    /// message stream.  No in-app action can fix this — the user must install
+    /// the binary or update their PATH.
+    MissingBinary {
+        /// The command name that was not found (e.g. `\"my-acp-agent\"`).
+        command: String,
+    },
 }
 
 // ── AgentReadiness ────────────────────────────────────────────────────────────
@@ -271,7 +339,13 @@ fn collect_missing_requirements(
     runtime: Option<&KnownAcpRuntime>,
 ) -> Vec<Requirement> {
     let Some(rt) = runtime else {
-        // Unknown/custom command — no requirements to check.
+        // Unknown/custom command — check that the binary is actually resolvable.
+        // No known requirement set beyond the PATH check.
+        if crate::managed_agents::resolve_command(&effective.effective_command).is_none() {
+            return vec![Requirement::MissingBinary {
+                command: effective.effective_command.clone(),
+            }];
+        }
         return vec![];
     };
 
@@ -329,6 +403,7 @@ fn buzz_agent_requirements(effective: &EffectiveAgentEnv) -> Vec<Requirement> {
         }
         Some("anthropic") => Some("ANTHROPIC_MODEL"),
         Some("openai") | Some("openai-compat") => Some("OPENAI_COMPAT_MODEL"),
+        Some("openrouter") => Some("OPENROUTER_MODEL"),
         _ => None,
     };
     let model_present = effective
@@ -369,6 +444,12 @@ fn buzz_agent_requirements(effective: &EffectiveAgentEnv) -> Vec<Requirement> {
             if env_key_missing("DATABRICKS_HOST") => {
                 missing.push(Requirement::EnvKey {
                     key: "DATABRICKS_HOST".to_string(),
+                });
+            }
+        Some("openrouter")
+            if env_key_missing("OPENROUTER_API_KEY") => {
+                missing.push(Requirement::EnvKey {
+                    key: "OPENROUTER_API_KEY".to_string(),
                 });
             }
         _ => {
@@ -476,6 +557,13 @@ fn goose_requirements(
         {
             missing.push(Requirement::EnvKey {
                 key: "DATABRICKS_HOST".to_string(),
+            });
+        }
+        Some("openrouter")
+            if env_key_missing("OPENROUTER_API_KEY") && !file_key_present("OPENROUTER_API_KEY") =>
+        {
+            missing.push(Requirement::EnvKey {
+                key: "OPENROUTER_API_KEY".to_string(),
             });
         }
         _ => {}
@@ -883,21 +971,20 @@ mod tests {
             default_env: &[],
             supports_acp_native_config: false,
             thinking_env_var: None,
+            effort_normalization: None,
+            effort_accepted_values: None,
             max_tokens_env_var: None,
             context_limit_env_var: None,
+            max_rounds_env_var: None,
             required_normalized_fields: &[],
             login_hint: None,
             auth_probe_args: None,
         }
     }
 
-    /// Returns the absolute path of the currently-running test binary as a
-    /// `&'static str`.  Host-portable stand-in for a "present" binary:
-    /// the path is absolute so `find_command` resolves it via `path.exists()`
-    /// rather than searching `PATH`, and the file always exists on the host.
-    ///
-    /// The tiny allocation is intentionally leaked — this runs at most once per
-    /// test process and the process exits immediately after tests complete.
+    /// Returns the absolute path of the currently-running test binary as a `&'static str`.
+    /// Host-portable stand-in for a "present" binary: absolute path so `find_command` resolves
+    /// it via `path.exists()`. Leaked allocation is intentional — process exits after tests.
     fn present_binary_str() -> &'static str {
         let path = std::env::current_exe().expect("current_exe must be available in tests");
         Box::leak(path.to_string_lossy().into_owned().into_boxed_str())
@@ -1078,8 +1165,11 @@ mod tests {
             default_env: &[],
             supports_acp_native_config: false,
             thinking_env_var: None,
+            effort_normalization: None,
+            effort_accepted_values: None,
             max_tokens_env_var: None,
             context_limit_env_var: None,
+            max_rounds_env_var: None,
             required_normalized_fields: &[],
             login_hint: None,
             auth_probe_args: None,
@@ -1207,10 +1297,30 @@ mod tests {
 
     #[test]
     fn unknown_command_is_always_ready() {
-        let env = make_env("my-custom-harness", BTreeMap::new());
+        // Since Phase B-7 (readiness exec-check), unknown/custom commands that are
+        // not resolvable in PATH produce a MissingBinary requirement rather than
+        // being unconditionally Ready.  A command that IS resolvable should be Ready.
+        // Use a known-present binary so the test is not environment-sensitive.
+        let env = make_env("sh", BTreeMap::new());
         assert!(
             agent_readiness(&env).is_ready(),
-            "unknown/custom command should always be Ready (no requirements)"
+            "unknown/custom command present in PATH should be Ready"
+        );
+    }
+
+    #[test]
+    fn unknown_command_missing_from_path_is_not_ready() {
+        let env = make_env("my-custom-harness-that-does-not-exist", BTreeMap::new());
+        let readiness = agent_readiness(&env);
+        assert!(
+            !readiness.is_ready(),
+            "unknown/custom command absent from PATH should be NotReady"
+        );
+        let reqs = readiness.requirements();
+        assert_eq!(reqs.len(), 1);
+        assert!(
+            matches!(&reqs[0], Requirement::MissingBinary { command } if command == "my-custom-harness-that-does-not-exist"),
+            "should surface MissingBinary requirement"
         );
     }
 
@@ -1278,21 +1388,20 @@ mod tests {
     }
 
     // ── resolve_effective_agent_env ─────────────────────────────────────────
-
     #[test]
     fn resolve_effective_agent_env_user_env_wins_over_structured_fields() {
-        // A record whose env_vars explicitly set provider/model must win over
-        // any baked defaults. In OSS test builds the baked map is empty, so
-        // this test validates the user-env layer is present in the output.
+        // User env_vars must win over baked defaults; in OSS builds baked map is empty,
+        // so this validates the user-env layer is present in the output.
         let mut env_vars = BTreeMap::new();
         env_vars.insert("BUZZ_AGENT_PROVIDER".to_string(), "anthropic".to_string());
         env_vars.insert(
             "BUZZ_AGENT_MODEL".to_string(),
             "claude-opus-4-5".to_string(),
         );
-
         // Minimal record: only the fields resolve_effective_agent_env reads.
         let record = crate::managed_agents::types::ManagedAgentRecord {
+            session_policy: Default::default(),
+            description: None,
             pubkey: "test-pubkey".to_string(),
             name: "test-agent".to_string(),
             persona_id: None,
@@ -1319,6 +1428,7 @@ mod tests {
             runtime_pid: None,
             backend: Default::default(),
             backend_agent_id: None,
+            provider_policy_pending: false,
             provider_binary_path: None,
             team_id: None,
             persona_team_dir: None,
@@ -1338,12 +1448,16 @@ mod tests {
             name_pool: Vec::new(),
             is_builtin: false,
             is_active: true,
+            shared: false,
             source_team: None,
             source_team_persona_slug: None,
+            catalog_source: None,
+            team_catalog_source: None,
             definition_respond_to: None,
             definition_respond_to_allowlist: Vec::new(),
             definition_parallelism: None,
             relay_mesh: None,
+            effort_level: None,
         };
 
         let runtime = known_acp_runtime_exact("buzz-agent");
@@ -1359,8 +1473,6 @@ mod tests {
             Some("claude-opus-4-5")
         );
     }
-
-    // ── provider-specific model fallback tests ────────────────────────────
 
     #[test]
     fn buzz_agent_databricks_v2_with_databricks_model_but_no_buzz_agent_model_is_ready() {
@@ -1494,195 +1606,15 @@ mod tests {
                 field: "model".to_string()
             }));
     }
+
+    // buzz-agent OpenRouter readiness tests live in a sibling file so this
+    // module stays under the desktop file-size ratchet.
+    #[path = "openrouter_tests.rs"]
+    mod openrouter_tests;
 }
 
-// ── goose file-config–aware requirement tests ─────────────────────────────
-//
-// These tests call `goose_requirements` directly, injecting a synthetic
-// `RuntimeFileConfig` so there is no disk I/O and tests are deterministic.
-
+// Goose file-config-aware requirement tests live in a sibling file so this
+// module stays under the desktop file-size ratchet.
 #[cfg(test)]
-mod goose_file_config_tests {
-    use std::collections::BTreeMap;
-
-    use super::*;
-    use crate::managed_agents::config_bridge::RuntimeFileConfig;
-
-    fn empty_env() -> EffectiveAgentEnv {
-        EffectiveAgentEnv {
-            env: BTreeMap::new(),
-            config_file_path: Some("~/.config/goose/config.yaml"),
-            effective_command: "goose".to_string(),
-        }
-    }
-
-    fn env_with(pairs: &[(&str, &str)]) -> EffectiveAgentEnv {
-        EffectiveAgentEnv {
-            env: pairs
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-            config_file_path: Some("~/.config/goose/config.yaml"),
-            effective_command: "goose".to_string(),
-        }
-    }
-
-    fn databricks_file_config() -> RuntimeFileConfig {
-        let mut extra = BTreeMap::new();
-        extra.insert(
-            "DATABRICKS_HOST".to_string(),
-            "https://dbc.example.com".to_string(),
-        );
-        RuntimeFileConfig {
-            provider: Some("databricks_v2".to_string()),
-            model: Some("goose-claude-4-6-opus".to_string()),
-            extra,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn goose_file_config_silences_databricks_host_requirement() {
-        // File has provider, model, and DATABRICKS_HOST — all requirements silenced.
-        let env = empty_env();
-        let cfg = databricks_file_config();
-        let result = goose_requirements(&env, Some(&cfg));
-        assert!(
-            result.is_empty(),
-            "all requirements should be silenced by goose file config; \
-             got: {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn goose_env_empty_file_absent_still_not_ready() {
-        // No env, no file config → provider and model both required.
-        let env = empty_env();
-        let result = goose_requirements(&env, None);
-        assert!(
-            result.contains(&Requirement::NormalizedField {
-                field: "provider".to_string()
-            }),
-            "provider must be required when absent from both env and file"
-        );
-        assert!(
-            result.contains(&Requirement::NormalizedField {
-                field: "model".to_string()
-            }),
-            "model must be required when absent from both env and file"
-        );
-    }
-
-    #[test]
-    fn goose_file_config_silences_provider_and_model_but_not_anthropic_key() {
-        // File has provider=anthropic and model, but ANTHROPIC_API_KEY is not
-        // in the file's `extra` map — it must still be required.
-        let cfg = RuntimeFileConfig {
-            provider: Some("anthropic".to_string()),
-            model: Some("claude-opus-4-5".to_string()),
-            extra: BTreeMap::new(),
-            ..Default::default()
-        };
-        let env = empty_env();
-        let result = goose_requirements(&env, Some(&cfg));
-        // Provider and model silenced.
-        assert!(
-            !result.contains(&Requirement::NormalizedField {
-                field: "provider".to_string()
-            }),
-            "provider silenced by file config"
-        );
-        assert!(
-            !result.contains(&Requirement::NormalizedField {
-                field: "model".to_string()
-            }),
-            "model silenced by file config"
-        );
-        // ANTHROPIC_API_KEY not in file extra → still required.
-        assert!(
-            result.contains(&Requirement::EnvKey {
-                key: "ANTHROPIC_API_KEY".to_string()
-            }),
-            "ANTHROPIC_API_KEY must remain required when not in file extra"
-        );
-    }
-
-    #[test]
-    fn goose_env_provider_wins_over_file_provider_for_cred_check() {
-        // Env has GOOSE_PROVIDER=anthropic (different from file's databricks_v2).
-        // The env provider must win for credential checking.
-        let env = env_with(&[
-            ("GOOSE_PROVIDER", "anthropic"),
-            ("GOOSE_MODEL", "claude-opus-4-5"),
-        ]);
-        let cfg = databricks_file_config(); // has provider=databricks_v2
-        let result = goose_requirements(&env, Some(&cfg));
-        // anthropic requires ANTHROPIC_API_KEY, not DATABRICKS_HOST.
-        assert!(
-            result.contains(&Requirement::EnvKey {
-                key: "ANTHROPIC_API_KEY".to_string()
-            }),
-            "env provider=anthropic must require ANTHROPIC_API_KEY"
-        );
-        assert!(
-            !result.contains(&Requirement::EnvKey {
-                key: "DATABRICKS_HOST".to_string()
-            }),
-            "env provider=anthropic must NOT require DATABRICKS_HOST"
-        );
-    }
-
-    #[test]
-    fn goose_flat_databricks_host_in_file_config_silences_requirement() {
-        // Will's typical goose config: flat DATABRICKS_HOST at the top level,
-        // no active_provider — provider inferred as "databricks".
-        // The parser must store extra["DATABRICKS_HOST"] = value (canonical key),
-        // and goose_requirements must then silence the DATABRICKS_HOST requirement.
-        let mut extra = BTreeMap::new();
-        extra.insert(
-            "DATABRICKS_HOST".to_string(),
-            "https://block.cloud.databricks.com".to_string(),
-        );
-        let cfg = RuntimeFileConfig {
-            provider: Some("databricks".to_string()),
-            model: Some("goose-claude-4-5".to_string()),
-            extra,
-            ..Default::default()
-        };
-        let env = empty_env();
-        let result = goose_requirements(&env, Some(&cfg));
-        // All requirements silenced — provider (file), model (file), DATABRICKS_HOST (file).
-        assert!(
-            result.is_empty(),
-            "flat DATABRICKS_HOST in file config must silence all requirements; \
-             got: {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn goose_goose_provider_databricks_flat_host_silences_databricks_host() {
-        // GOOSE_PROVIDER=databricks (not active_provider) + flat DATABRICKS_HOST.
-        // The parser canonicalizes to extra["DATABRICKS_HOST"]; readiness must silence it.
-        let mut extra = BTreeMap::new();
-        extra.insert(
-            "DATABRICKS_HOST".to_string(),
-            "https://dbc.example.com".to_string(),
-        );
-        let cfg = RuntimeFileConfig {
-            provider: Some("databricks".to_string()),
-            model: Some("some-model".to_string()),
-            extra,
-            ..Default::default()
-        };
-        let env = empty_env();
-        let result = goose_requirements(&env, Some(&cfg));
-        assert!(
-            !result.contains(&Requirement::EnvKey {
-                key: "DATABRICKS_HOST".to_string()
-            }),
-            "DATABRICKS_HOST must be silenced when canonical key is in file extra"
-        );
-    }
-}
+#[path = "readiness_goose_file_config_tests.rs"]
+mod goose_file_config_tests;

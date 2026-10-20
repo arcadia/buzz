@@ -50,7 +50,7 @@ env:
   # the install ref documented in deploy/charts/buzz/README.md). Set
   # GHCR_CHART_REPO as a repo variable to override (e.g., forks pushing to their
   # own namespace without editing this file) — mirrors docker.yml's GHCR_IMAGE.
-  CHART_REPO: ${{ vars.GHCR_CHART_REPO != '' && vars.GHCR_CHART_REPO || 'oci://ghcr.io/block/buzz/charts' }}
+  CHART_REPO: ${{ vars.GHCR_CHART_REPO != '' && vars.GHCR_CHART_REPO || format('oci://ghcr.io/{0}/buzz/charts', github.repository_owner) }}
 
 jobs:
   lint-and-unittest:
@@ -59,7 +59,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # On chart-tag rescue dispatch, lint/render the tagged commit that the
           # publish job will package, not whatever `main` is when the dispatch
@@ -119,7 +119,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
@@ -166,7 +166,7 @@ jobs:
       packages: write    # push the chart to GHCR
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # On the rescue dispatch, build the tagged commit (github.ref is
           # `main` there); on a tag push, the default ref is already the tag.

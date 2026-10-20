@@ -1,16 +1,15 @@
-use std::path::PathBuf;
-
 use super::overrides::{divergent_agent_command_override, update_time_agent_command_override};
 use super::{
-    apply_agent_command_update, classify_runtime, codex_adapter_availability,
-    codex_adapter_is_outdated, create_time_agent_command_override, default_agent_command,
-    effective_agent_command, find_nvm_default_bin, find_via_login_shell,
+    apply_agent_command_update, apply_env_vars_then_effort_transition, classify_runtime,
+    codex_adapter_availability, codex_adapter_is_outdated, create_time_agent_command_override,
+    default_agent_command, effective_agent_command, find_nvm_default_bin,
     is_login_shell_path_uninit, is_safe_nvm_tag, managed_agent_avatar_url, normalize_agent_args,
-    parse_semver_tag, probe_codex_acp_major_version, record_agent_command,
-    refresh_login_shell_path, BUZZ_AGENT_AVATAR_URL, CLAUDE_CODE_AVATAR_URL, CODEX_AVATAR_URL,
-    GOOSE_AVATAR_URL,
+    parse_semver_tag, probe_codex_acp_version, record_agent_command, refresh_login_shell_path,
+    remove_record_effort_aliases, try_record_agent_command, BUZZ_AGENT_AVATAR_URL,
+    CLAUDE_CODE_AVATAR_URL, CODEX_AVATAR_URL, GOOSE_AVATAR_URL,
 };
 use crate::managed_agents::AcpAvailabilityStatus;
+use std::path::PathBuf;
 
 #[test]
 fn resolves_known_avatar_for_bare_command() {
@@ -46,10 +45,8 @@ fn returns_none_for_unknown_commands() {
 
 #[test]
 fn default_agent_command_resolves_bundled_buzz_agent() {
-    // The create-path default must be the bundled buzz-agent, never the
-    // bare `goose` that isn't on PATH on a stock Windows install.
+    // The default must be bundled buzz-agent, never bare `goose` on a stock Windows install.
     assert_eq!(default_agent_command(), "buzz-agent");
-    // And buzz-agent takes no `acp` arg — confirm no arg leakage from the default.
     assert_eq!(
         normalize_agent_args(&default_agent_command(), vec!["acp".into()]),
         Vec::<String>::new()
@@ -93,24 +90,6 @@ fn normalizes_buzz_agent_args_to_empty() {
     assert_eq!(
         normalize_agent_args("buzz-agent", vec!["acp".into()]),
         Vec::<String>::new()
-    );
-}
-
-#[test]
-fn login_shell_lookup_treats_command_as_data() {
-    let marker =
-        std::env::temp_dir().join(format!("buzz-discovery-marker-{}", uuid::Uuid::new_v4()));
-    let payload = format!("doesnotexist; touch {} #", marker.display());
-
-    let resolved = find_via_login_shell(&payload);
-
-    assert!(
-        resolved.is_none(),
-        "payload should not resolve to a command"
-    );
-    assert!(
-        !marker.exists(),
-        "shell lookup must not execute injected commands"
     );
 }
 
@@ -176,7 +155,6 @@ fn classifies_not_installed_when_no_underlying_cli() {
     assert!(cmd.is_none());
     assert!(path.is_none());
 }
-
 #[test]
 fn classifies_cli_missing_when_adapter_found_but_cli_absent() {
     let (status, cmd, path) = classify_runtime(
@@ -188,21 +166,26 @@ fn classifies_cli_missing_when_adapter_found_but_cli_absent() {
     assert_eq!(cmd.as_deref(), Some("codex-acp"));
     assert_eq!(path.as_deref(), Some("/opt/homebrew/bin/codex-acp"));
 }
-
 fn persona_with_runtime(id: &str, runtime: Option<&str>) -> crate::managed_agents::AgentDefinition {
     crate::managed_agents::AgentDefinition {
+        session_policy: Default::default(),
+        description: None,
         id: id.to_string(),
         display_name: id.to_string(),
         avatar_url: None,
         system_prompt: String::new(),
+        acp_command: None,
         runtime: runtime.map(str::to_string),
         model: None,
         provider: None,
         name_pool: Vec::new(),
         is_builtin: false,
         is_active: true,
+        shared: false,
         source_team: None,
         source_team_persona_slug: None,
+        catalog_source: None,
+        team_catalog_source: None,
         env_vars: std::collections::BTreeMap::new(),
         respond_to: None,
         respond_to_allowlist: Vec::new(),
@@ -221,15 +204,15 @@ fn effective_agent_command_explicit_override_wins() {
         "codex-acp"
     );
 }
-
-/// Minimal record for `record_agent_command` tests. Only the resolution
-/// inputs (runtime / persona_id / agent_command_override) vary.
-fn record_with(
+/// Minimal record for `record_agent_command` tests; only resolution inputs vary.
+pub(super) fn record_with(
     runtime: Option<&str>,
     persona_id: Option<&str>,
     override_cmd: Option<&str>,
 ) -> crate::managed_agents::types::ManagedAgentRecord {
     crate::managed_agents::types::ManagedAgentRecord {
+        session_policy: Default::default(),
+        description: None,
         pubkey: String::new(),
         name: "r".to_string(),
         persona_id: persona_id.map(str::to_string),
@@ -255,6 +238,7 @@ fn record_with(
         runtime_pid: None,
         backend: Default::default(),
         backend_agent_id: None,
+        provider_policy_pending: false,
         provider_binary_path: None,
         team_id: None,
         persona_team_dir: None,
@@ -275,19 +259,22 @@ fn record_with(
         name_pool: Vec::new(),
         is_builtin: false,
         is_active: true,
+        shared: false,
         source_team: None,
         source_team_persona_slug: None,
+        catalog_source: None,
+        team_catalog_source: None,
         definition_respond_to: None,
         definition_respond_to_allowlist: Vec::new(),
         definition_parallelism: None,
         relay_mesh: None,
+        effort_level: None,
     }
 }
 
 #[test]
 fn record_agent_command_own_runtime_wins_over_persona() {
-    // A record with its own materialized runtime never consults the
-    // persona list — the unified-model resolution.
+    // A record with its own runtime never consults the persona list.
     let personas = vec![persona_with_runtime("p1", Some("goose"))];
     let record = record_with(Some("claude"), Some("p1"), None);
     assert_eq!(record_agent_command(&record, &personas), "claude-agent-acp");
@@ -312,6 +299,62 @@ fn record_agent_command_legacy_persona_fallback() {
 fn record_agent_command_bare_record_defaults() {
     let record = record_with(None, None, None);
     assert_eq!(record_agent_command(&record, &[]), default_agent_command());
+}
+
+/// When the record carries a dangling (unknown) runtime id, `try_record_agent_command`
+/// must return `Err` containing "DANGLING_HARNESS_ID" — NEVER the buzz-agent default.
+/// This test would fail if the function silently fell back to `default_agent_command()`.
+#[test]
+fn try_record_agent_command_dangling_runtime_id_returns_err() {
+    let record = record_with(Some("my-deleted-harness"), None, None);
+    let result = try_record_agent_command(&record, &[]);
+    assert!(
+        result.is_err(),
+        "dangling runtime id must produce Err, got Ok({:?})",
+        result.ok()
+    );
+    assert!(
+        result.unwrap_err().contains("DANGLING_HARNESS_ID"),
+        "error must name the dangling id"
+    );
+}
+
+/// When the persona carries a dangling runtime id, `try_record_agent_command`
+/// must also error — the error must not silently resolve to the default.
+#[test]
+fn try_record_agent_command_dangling_persona_runtime_returns_err() {
+    let personas = vec![persona_with_runtime("p1", Some("ghost-harness"))];
+    let record = record_with(None, Some("p1"), None);
+    let result = try_record_agent_command(&record, &personas);
+    assert!(
+        result.is_err(),
+        "dangling persona runtime id must produce Err"
+    );
+}
+
+/// When neither the record nor persona has any runtime id, `try_record_agent_command`
+/// falls back to `default_agent_command()` — this is the legacy-agent path.
+#[test]
+fn try_record_agent_command_no_runtime_id_defaults_to_buzz_agent() {
+    let record = record_with(None, None, None);
+    let result = try_record_agent_command(&record, &[]);
+    assert_eq!(
+        result,
+        Ok(default_agent_command()),
+        "no runtime id must fall back to the safe default"
+    );
+}
+
+/// An explicit agent_command_override always wins, even for a dangling runtime id.
+#[test]
+fn try_record_agent_command_override_beats_dangling_id() {
+    let record = record_with(Some("gone-harness"), None, Some("cursor-agent"));
+    let result = try_record_agent_command(&record, &[]);
+    assert_eq!(
+        result,
+        Ok("cursor-agent".to_string()),
+        "explicit override must beat a dangling runtime id"
+    );
 }
 
 #[test]
@@ -564,104 +607,78 @@ fn update_time_override_preserves_pin_for_persona_less_agent() {
     );
 }
 
-#[test]
-fn apply_agent_command_update_inherit_sentinel_clears_pin_and_runtime() {
-    // Choosing Inherit on a persona-linked record clears BOTH the explicit
-    // pin and the materialized runtime, so resolution falls through to the
-    // live definition immediately — not on the next spawn.
-    let personas = vec![persona_with_runtime("p1", Some("goose"))];
-    let mut record = record_with(Some("claude"), Some("p1"), Some("codex-acp"));
+// ── probe_codex_acp_version ───────────────────────────────────────────────────
 
-    apply_agent_command_update(&mut record, &personas, "", false);
-
-    assert_eq!(record.agent_command_override, None);
-    assert_eq!(record.runtime, None);
-    assert_eq!(record_agent_command(&record, &personas), "goose");
-}
-
-#[test]
-fn apply_agent_command_update_sentinel_keeps_runtime_for_definition_less_record() {
-    // For a record with no persona link the materialized runtime is the only
-    // harness source left once the pin is cleared — a stray empty
-    // agent_command must not change what the agent runs.
-    let mut record = record_with(Some("claude"), None, Some("codex-acp"));
-
-    apply_agent_command_update(&mut record, &[], "", false);
-
-    assert_eq!(record.agent_command_override, None);
-    assert_eq!(record.runtime.as_deref(), Some("claude"));
-    assert_eq!(record_agent_command(&record, &[]), "claude-agent-acp");
-}
-
-#[test]
-fn apply_agent_command_update_concrete_pin_keeps_materialized_runtime() {
-    // A concrete pick only sets the pin; the materialized runtime is left for
-    // the next snapshot apply. The pin shadows it in resolution either way.
-    let personas = vec![persona_with_runtime("p1", Some("goose"))];
-    let mut record = record_with(Some("claude"), Some("p1"), None);
-
-    apply_agent_command_update(&mut record, &personas, "codex-acp", true);
-
-    assert_eq!(record.agent_command_override.as_deref(), Some("codex-acp"));
-    assert_eq!(record.runtime.as_deref(), Some("claude"));
-    assert_eq!(record_agent_command(&record, &personas), "codex-acp");
-}
-
-// ── probe_codex_acp_major_version ─────────────────────────────────────────────
-
+mod effort_clear;
+mod forced_discovery;
 mod managed_path_resolution;
+
+/// Write an executable script without opening it for writing in this process.
+///
+/// Linux refuses to exec a file while any process holds it open for writing
+/// (`ETXTBSY`). A sibling test that spawns between our open and close copies
+/// that descriptor into its child until the child execs, so an in-process
+/// `fs::write` can make the probe's spawn fail intermittently. A short-lived
+/// shell writes the file instead, and its descriptor is gone once it exits.
+#[cfg(unix)]
+fn write_executable_script(path: &std::path::Path, contents: impl AsRef<str>) {
+    let status = std::process::Command::new("/bin/sh")
+        .args(["-c", r#"printf '%s' "$2" > "$1" && chmod 755 "$1""#, "sh"])
+        .arg(path)
+        .arg(contents.as_ref())
+        .status()
+        .expect("spawn script writer");
+    assert!(status.success(), "write script {}", path.display());
+}
 
 #[cfg(unix)]
 #[test]
-fn probe_codex_acp_major_version_parses_1x_output() {
-    use std::os::unix::fs::PermissionsExt;
-
-    // Simulate `@agentclientprotocol/codex-acp 1.1.2` output (1.x adapter)
+fn probe_codex_acp_version_parses_full_semver_output() {
+    // Simulate a current `@agentclientprotocol/codex-acp` output.
     let dir = std::env::temp_dir().join(format!("buzz-probe-1x-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let bin = dir.join("codex-acp");
-    std::fs::write(
+    write_executable_script(
         &bin,
-        "#!/bin/sh\necho '@agentclientprotocol/codex-acp 1.1.2'\nexit 0\n",
-    )
-    .expect("write script");
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
+        "#!/bin/sh\necho '@agentclientprotocol/codex-acp 1.1.7'\nexit 0\n",
+    );
 
-    let major = probe_codex_acp_major_version(&bin);
+    let version = probe_codex_acp_version(&bin);
     let _ = std::fs::remove_dir_all(dir);
 
-    assert_eq!(major, Some(1), "1.x adapter must return major version 1");
+    assert_eq!(
+        version,
+        Some((1, 1, 7)),
+        "adapter output must parse to its full semantic version"
+    );
 }
 
 mod codex_version;
 
 #[cfg(unix)]
 #[test]
-fn probe_codex_acp_major_version_returns_none_for_nonzero_exit() {
-    use std::os::unix::fs::PermissionsExt;
-
+fn probe_codex_acp_version_returns_none_for_nonzero_exit() {
     // Simulate old 0.16.x adapter: `--version` is unrecognised, exits non-zero
     let dir = std::env::temp_dir().join(format!("buzz-probe-0x-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let bin = dir.join("codex-acp");
-    std::fs::write(&bin, "#!/bin/sh\nexit 1\n").expect("write script");
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
+    write_executable_script(&bin, "#!/bin/sh\nexit 1\n");
 
-    let major = probe_codex_acp_major_version(&bin);
+    let version = probe_codex_acp_version(&bin);
     let _ = std::fs::remove_dir_all(dir);
 
     assert_eq!(
-        major, None,
+        version, None,
         "old 0.16.x adapter (non-zero exit) must return None"
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn probe_codex_acp_major_version_returns_none_for_missing_binary() {
+fn probe_codex_acp_version_returns_none_for_missing_binary() {
     let path = std::path::Path::new("/nonexistent/path/codex-acp-does-not-exist");
-    let major = probe_codex_acp_major_version(path);
-    assert_eq!(major, None, "missing binary must return None");
+    let version = probe_codex_acp_version(path);
+    assert_eq!(version, None, "missing binary must return None");
 }
 
 // ── codex_adapter_availability / codex_adapter_is_outdated ───────────────────
@@ -671,18 +688,14 @@ fn probe_codex_acp_major_version_returns_none_for_missing_binary() {
 
 #[cfg(unix)]
 #[test]
-fn codex_adapter_availability_available_for_1x_binary() {
-    use std::os::unix::fs::PermissionsExt;
-
+fn codex_adapter_availability_available_for_minimum_supported_binary() {
     let dir = std::env::temp_dir().join(format!("buzz-avail-1x-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let bin = dir.join("codex-acp");
-    std::fs::write(
+    write_executable_script(
         &bin,
-        "#!/bin/sh\necho '@agentclientprotocol/codex-acp 1.1.2'\nexit 0\n",
-    )
-    .expect("write script");
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
+        "#!/bin/sh\necho '@agentclientprotocol/codex-acp 1.10.0'\nexit 0\n",
+    );
 
     let status = codex_adapter_availability(&bin);
     let _ = std::fs::remove_dir_all(dir);
@@ -690,21 +703,18 @@ fn codex_adapter_availability_available_for_1x_binary() {
     assert_eq!(
         status,
         AcpAvailabilityStatus::Available,
-        "1.x adapter must classify as Available"
+        "minimum supported adapter must classify as Available"
     );
 }
 
 #[cfg(unix)]
 #[test]
 fn codex_adapter_availability_outdated_for_0x_binary() {
-    use std::os::unix::fs::PermissionsExt;
-
     // Simulate old 0.16.x: `--version` exits non-zero (unrecognised flag)
     let dir = std::env::temp_dir().join(format!("buzz-avail-0x-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let bin = dir.join("codex-acp");
-    std::fs::write(&bin, "#!/bin/sh\nexit 1\n").expect("write script");
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
+    write_executable_script(&bin, "#!/bin/sh\nexit 1\n");
 
     let status = codex_adapter_availability(&bin);
     let _ = std::fs::remove_dir_all(dir);
@@ -714,6 +724,27 @@ fn codex_adapter_availability_outdated_for_0x_binary() {
         AcpAvailabilityStatus::AdapterOutdated,
         "0.x adapter (non-zero exit) must classify as AdapterOutdated"
     );
+}
+
+/// The strict three-component parse fails closed: a version Buzz cannot compare
+/// against the floor is treated as outdated rather than assumed current.
+#[cfg(unix)]
+#[test]
+fn codex_adapter_availability_outdated_for_uncomparable_version() {
+    for version in ["1.2", "1.2.0-rc1"] {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let bin = dir.path().join("codex-acp");
+        write_executable_script(
+            &bin,
+            format!("#!/bin/sh\necho '@agentclientprotocol/codex-acp {version}'\nexit 0\n"),
+        );
+
+        assert_eq!(
+            codex_adapter_availability(&bin),
+            AcpAvailabilityStatus::AdapterOutdated,
+            "version {version} is not comparable to the floor and must fail closed"
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -734,8 +765,7 @@ fn codex_adapter_availability_outdated_for_missing_binary() {
 
 #[cfg(unix)]
 #[test]
-fn probe_codex_acp_major_version_returns_none_for_hung_direct_child() {
-    use std::os::unix::fs::PermissionsExt;
+fn probe_codex_acp_version_returns_none_for_hung_direct_child() {
     use std::time::Instant;
 
     // Simulate a process that writes version to stdout then blocks forever.
@@ -744,20 +774,18 @@ fn probe_codex_acp_major_version_returns_none_for_hung_direct_child() {
     let dir = std::env::temp_dir().join(format!("buzz-probe-hung-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let bin = dir.join("codex-acp");
-    std::fs::write(
+    write_executable_script(
         &bin,
         "#!/bin/sh\nprintf '@agentclientprotocol/codex-acp 1.1.2\\n'\nexec sleep 300\n",
-    )
-    .expect("write script");
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
+    );
 
     let start = Instant::now();
-    let major = probe_codex_acp_major_version(&bin);
+    let version = probe_codex_acp_version(&bin);
     let elapsed = start.elapsed();
     let _ = std::fs::remove_dir_all(dir);
 
     assert_eq!(
-        major, None,
+        version, None,
         "hung binary must return None (timeout kills child)"
     );
     // The timeout is 5 s; give a 10 s margin for parallel pre-push suites.
@@ -769,8 +797,7 @@ fn probe_codex_acp_major_version_returns_none_for_hung_direct_child() {
 
 #[cfg(unix)]
 #[test]
-fn probe_codex_acp_major_version_returns_version_when_descendant_holds_pipe_open() {
-    use std::os::unix::fs::PermissionsExt;
+fn probe_codex_acp_version_returns_version_when_descendant_holds_pipe_open() {
     use std::time::Instant;
 
     // Simulate a process that forks a background child which inherits stdout
@@ -781,20 +808,18 @@ fn probe_codex_acp_major_version_returns_version_when_descendant_holds_pipe_open
     // (the parent closed its write end), read_to_end() returns immediately
     // without waiting for the descendant to close its inherited fd.
     //
-    // `(exec sleep 60 &)` forks a subshell that execs `sleep 60`; the subshell
-    // inherits the parent's stdout fd and keeps it open.
+    // `sleep 60 &` starts a descendant that inherits the parent's stdout fd
+    // without making the direct child wait for a nested subshell to exit.
     let dir = std::env::temp_dir().join(format!("buzz-probe-descendant-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let bin = dir.join("codex-acp");
-    std::fs::write(
+    write_executable_script(
         &bin,
-        "#!/bin/sh\necho '@agentclientprotocol/codex-acp 1.1.2'\n(exec sleep 60 &)\nexit 0\n",
-    )
-    .expect("write script");
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
+        "#!/bin/sh\necho '@agentclientprotocol/codex-acp 1.1.2'\nsleep 60 &\nexit 0\n",
+    );
 
     let start = Instant::now();
-    let major = probe_codex_acp_major_version(&bin);
+    let version = probe_codex_acp_version(&bin);
     let elapsed = start.elapsed();
     let _ = std::fs::remove_dir_all(dir);
 
@@ -805,9 +830,9 @@ fn probe_codex_acp_major_version_returns_version_when_descendant_holds_pipe_open
         "probe must not block on descendant pipe; elapsed: {elapsed:?}"
     );
     assert_eq!(
-        major,
-        Some(1),
-        "1.x version must be parsed even when descendant holds pipe open"
+        version,
+        Some((1, 1, 2)),
+        "version must be parsed even when descendant holds pipe open"
     );
 }
 

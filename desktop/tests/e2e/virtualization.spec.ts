@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
 import { installMockBridge } from "../helpers/bridge";
+import { waitForMockChannelHeadReady } from "../helpers/channelHeadReady";
 
 const WATERCOOLER_CHANNEL_ID = "a27e1ee9-76a6-5bdf-a5d5-1d85610dad11";
 const FORUM_THREAD_ID = "mock-forum-release-thread";
@@ -32,15 +33,69 @@ async function seedChannelSections(page: Page) {
 // the sequence dnd-kit needs to fire onDragEnd and commit the reorder.
 async function dragOver(page: Page, source: Locator, target: Locator) {
   const from = await source.boundingBox();
-  const to = await target.boundingBox();
-  if (!from || !to) throw new Error("drag handles not laid out");
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2 + 10);
-  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {
-    steps: 10,
+  if (!from) throw new Error("drag source not laid out");
+  const pointer = {
+    x: from.x + from.width / 2,
+    y: from.y + from.height / 2,
+  };
+  await source.dispatchEvent("pointerdown", {
+    button: 0,
+    buttons: 1,
+    clientX: pointer.x,
+    clientY: pointer.y,
+    isPrimary: true,
+    pointerId: 1,
+    pointerType: "mouse",
   });
-  await page.mouse.up();
+  await page.evaluate(({ x, y }) => {
+    document.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        buttons: 1,
+        clientX: x,
+        clientY: y + 8,
+        isPrimary: true,
+        pointerId: 1,
+        pointerType: "mouse",
+      }),
+    );
+  }, pointer);
+  await expect(page.getByTestId("sidebar-section-drag-overlay")).toBeVisible();
+
+  const to = await target.boundingBox();
+  if (!to) throw new Error("drag target not laid out");
+  const destination = {
+    x: to.x + to.width / 2,
+    y: to.y + to.height - 2,
+  };
+  await page.evaluate(async ({ x, y }) => {
+    document.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        buttons: 1,
+        clientX: x,
+        clientY: y,
+        isPrimary: true,
+        pointerId: 1,
+        pointerType: "mouse",
+      }),
+    );
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    document.dispatchEvent(
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        button: 0,
+        buttons: 0,
+        clientX: x,
+        clientY: y,
+        isPrimary: true,
+        pointerId: 1,
+        pointerType: "mouse",
+      }),
+    );
+  }, destination);
 }
 
 test.describe("list virtualization", () => {
@@ -160,6 +215,10 @@ test.describe("list virtualization", () => {
     const headers = page.locator('[aria-roledescription="sortable"]');
     const topHeader = headers.filter({ hasText: "Priority" });
     const bottomHeader = headers.filter({ hasText: "Archive" });
+    const topHeaderButton = topHeader.getByRole("button", {
+      name: "Priority",
+      exact: true,
+    });
     await expect(topHeader).toBeVisible();
     await expect(bottomHeader).toBeVisible();
     await expect(headers).toHaveCount(2);
@@ -176,7 +235,7 @@ test.describe("list virtualization", () => {
 
     // Drag "Priority" past "Archive" — onDragEnd commits arrayMove and persists
     // the new order. The drop must land for the order to flip.
-    await dragOver(page, topHeader, bottomHeader);
+    await dragOver(page, topHeaderButton, bottomHeader);
 
     // The drop landed: order flipped. A no-op drag would leave it unchanged.
     await expect.poll(sectionOrder).toEqual(["Archive", "Priority"]);
@@ -252,6 +311,29 @@ test.describe("list virtualization", () => {
       });
       await page.waitForTimeout(150);
       const before = await sampleVisibleAnchor();
+      const ctrlWheelPromise =
+        pageIndex === 0
+          ? timeline.evaluate(
+              (scroller) =>
+                new Promise<boolean>((resolve) => {
+                  const s = scroller as HTMLElement;
+                  const observer = new MutationObserver(() => {
+                    observer.disconnect();
+                    // Ctrl+wheel is browser zoom, not reader scroll intent. Fire
+                    // it synchronously with the prepend DOM commit, before the
+                    // ResizeObserver measurement batch reconciles estimated rows.
+                    s.dispatchEvent(
+                      new WheelEvent("wheel", { ctrlKey: true, deltaY: -100 }),
+                    );
+                    resolve(true);
+                  });
+                  observer.observe(s.firstElementChild ?? s, {
+                    childList: true,
+                    subtree: true,
+                  });
+                }),
+            )
+          : Promise.resolve(false);
       const wheelTracePromise = timeline.evaluate(async (scroller) => {
         const s = scroller as HTMLElement;
         let previousScrollTop = s.scrollTop;
@@ -335,6 +417,7 @@ test.describe("list virtualization", () => {
         },
       );
       expect(motion.sawPrepend).toBe(true);
+      if (pageIndex === 0) expect(await ctrlWheelPromise).toBe(true);
       expect(motion.maxDrift).toBeLessThan(5);
 
       await expect
@@ -357,38 +440,91 @@ test.describe("list virtualization", () => {
         await timeline.evaluate((element) => element.clientHeight),
       );
 
-      // Leave the boundary with real downward wheel input while this prepend's
-      // three-second semantic-anchor watcher is still alive. The watcher belongs
-      // only to the completed prepend: it must not reinterpret this deliberate
-      // reader movement as row drift and pull the viewport back toward its stale
-      // baseline before the next upward load.
-      const exitTracePromise = timeline.evaluate(async (scroller) => {
-        const s = scroller as HTMLElement;
-        const startScrollTop = s.scrollTop;
-        let previousScrollTop = startScrollTop;
-        let maxForwardTravel = 0;
-        let maxRollback = 0;
-        const deadline = performance.now() + 400;
-        while (performance.now() < deadline) {
-          const travel = s.scrollTop - startScrollTop;
-          maxForwardTravel = Math.max(maxForwardTravel, travel);
-          maxRollback = Math.max(maxRollback, previousScrollTop - s.scrollTop);
-          previousScrollTop = s.scrollTop;
-          await new Promise((resolve) => requestAnimationFrame(resolve));
-        }
-        return { maxForwardTravel, maxRollback };
-      });
+      // Leave the boundary with real downward wheel input after this prepend.
+      // That reader intent retires Virtua's active prepend reconciliation, so
+      // later row measurements must not pull the viewport back toward the
+      // completed prepend before the next upward load.
       const exitBox = await timeline.boundingBox();
       if (!exitBox) throw new Error("timeline has no bounding box");
       await page.mouse.move(
         exitBox.x + exitBox.width / 2,
         exitBox.y + exitBox.height / 2,
       );
-      for (const deltaY of [120, 100, 80]) {
-        await page.mouse.wheel(0, deltaY);
-        await page.waitForTimeout(12);
+      // Arm after pointer positioning and keep sampling through every delivered
+      // wheel and its scrollend. A fixed recording window can expire between
+      // CDP wheel calls on a busy runner, before the burst has actually finished.
+      const exitRecorder = await timeline.evaluateHandle((scroller) => {
+        const startScrollTop = scroller.scrollTop;
+        let previousScrollTop = startScrollTop;
+        let animationFrame = 0;
+        const state = {
+          maxForwardTravel: 0,
+          maxRollback: 0,
+          wheelEvents: 0,
+          scrollEnded: false,
+          stableFrames: 0,
+          cleanup: () => {
+            cancelAnimationFrame(animationFrame);
+            scroller.removeEventListener("wheel", onWheel);
+            scroller.removeEventListener("scrollend", onScrollEnd);
+          },
+        };
+        const onWheel = () => {
+          state.wheelEvents += 1;
+          state.scrollEnded = false;
+          state.stableFrames = 0;
+        };
+        const onScrollEnd = () => {
+          state.scrollEnded = true;
+        };
+        const sample = () => {
+          const scrollTop = scroller.scrollTop;
+          state.maxForwardTravel = Math.max(
+            state.maxForwardTravel,
+            scrollTop - startScrollTop,
+          );
+          state.maxRollback = Math.max(
+            state.maxRollback,
+            previousScrollTop - scrollTop,
+          );
+          state.stableFrames =
+            scrollTop === previousScrollTop ? state.stableFrames + 1 : 0;
+          previousScrollTop = scrollTop;
+          animationFrame = requestAnimationFrame(sample);
+        };
+        scroller.addEventListener("wheel", onWheel, { passive: true });
+        scroller.addEventListener("scrollend", onScrollEnd);
+        animationFrame = requestAnimationFrame(sample);
+        return state;
+      });
+      let exitTrace: { maxForwardTravel: number; maxRollback: number };
+      try {
+        for (const deltaY of [120, 100, 80]) {
+          await page.mouse.wheel(0, deltaY);
+        }
+        exitTrace = await exitRecorder.evaluate(async (state) => {
+          const deadline = performance.now() + 5_000;
+          while (
+            state.wheelEvents < 3 ||
+            !state.scrollEnded ||
+            state.stableFrames < 2
+          ) {
+            if (performance.now() >= deadline) {
+              throw new Error(
+                `exit wheel burst did not settle (${state.wheelEvents}/3 events)`,
+              );
+            }
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+          }
+          return {
+            maxForwardTravel: state.maxForwardTravel,
+            maxRollback: state.maxRollback,
+          };
+        });
+      } finally {
+        await exitRecorder.evaluate((state) => state.cleanup());
+        await exitRecorder.dispose();
       }
-      const exitTrace = await exitTracePromise;
       expect(exitTrace.maxForwardTravel).toBeGreaterThan(200);
       expect(exitTrace.maxRollback).toBeLessThan(5);
 
@@ -667,6 +803,10 @@ test("offscreen rich-row resize preserves the viewport-center anchor", async ({
 
   const result = await timeline.evaluate(async (element) => {
     const scroller = element as HTMLDivElement;
+    // Retire bottom-follow intent the same way real reader input does before
+    // moving into detached history. A raw scrollTop assignment alone is not
+    // user intent and would correctly leave bottom following armed.
+    scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
     scroller.scrollTop = scroller.scrollHeight / 2;
     scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -781,16 +921,47 @@ test("live tail arrivals stay buffered while reading and release on jump", async
   );
   await page.getByTestId("channel-deep-history").click();
 
+  await waitForMockChannelHeadReady(
+    page,
+    "deep-history",
+    "feedf00d-0000-4000-8000-000000000007",
+  );
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+
   const timeline = page.getByTestId("message-timeline");
   await expect(timeline.locator("[data-message-id]").first()).toBeVisible();
   await timeline.evaluate((element) => {
+    // Reader input retires the virtualizer's bottom-follow intent before
+    // moving into history; a scrollTop write alone leaves it armed.
+    element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
     element.scrollTop = Math.max(500, element.scrollHeight / 2);
     element.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
   await expect(page.getByTestId("message-scroll-to-latest")).toBeVisible();
-  const frozenHeight = await timeline.evaluate(
-    (element) => element.scrollHeight,
-  );
+  const frozenHeight = await timeline.evaluate(async (element) => {
+    // Entering history renders and measures new virtual rows. Capture the
+    // baseline only after that layout has stopped changing across frames.
+    let previousHeight = element.scrollHeight;
+    let previousOffset = element.scrollTop;
+    let stableFrames = 0;
+    for (let frame = 0; frame < 120; frame += 1) {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      const height = element.scrollHeight;
+      const offset = element.scrollTop;
+      stableFrames =
+        height === previousHeight && offset === previousOffset
+          ? stableFrames + 1
+          : 0;
+      if (stableFrames >= 3) return height;
+      previousHeight = height;
+      previousOffset = offset;
+    }
+    throw new Error(
+      "virtual timeline layout did not settle before live arrival",
+    );
+  });
 
   await page.evaluate(() => {
     window.__BUZZ_E2E_EMIT_MOCK_MESSAGE__?.({
@@ -808,4 +979,53 @@ test("live tail arrivals stay buffered while reading and release on jump", async
 
   await page.getByTestId("message-scroll-to-latest").click();
   await expect(page.getByText("buffered live tail sentinel")).toBeVisible();
+});
+
+test("a single scroll back to the bottom releases the live tail", async ({
+  page,
+}) => {
+  await installMockBridge(page);
+  await page.goto("/");
+  await page.waitForFunction(
+    () => typeof window.__BUZZ_E2E_EMIT_MOCK_MESSAGE__ === "function",
+  );
+  await page.evaluate(() => {
+    for (let index = 0; index < 20; index += 1) {
+      window.__BUZZ_E2E_EMIT_MOCK_MESSAGE__?.({
+        channelName: "general",
+        content: `single-return seed ${index}\nsecond line ${index}`,
+        createdAt: 1_700_000_000 + index,
+      });
+    }
+  });
+  await page.getByTestId("channel-general").click();
+  const timeline = page.getByTestId("message-timeline");
+  await expect(timeline).toContainText("single-return seed 19");
+  const distanceFromBottom = () =>
+    timeline.evaluate(
+      (element) =>
+        element.scrollHeight - element.clientHeight - element.scrollTop,
+    );
+  await expect.poll(distanceFromBottom).toBeLessThanOrEqual(1);
+
+  // Leave the bottom, then come back in one native scroll event, as a
+  // scrollbar jump, End key, or Playwright's scroll-into-view retry does.
+  await timeline.evaluate((element) => {
+    element.scrollTop -= 150;
+  });
+  await expect(page.getByTestId("message-scroll-to-latest")).toBeVisible();
+  await timeline.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(page.getByTestId("message-scroll-to-latest")).toHaveCount(0);
+
+  await page.evaluate(() => {
+    window.__BUZZ_E2E_EMIT_MOCK_MESSAGE__?.({
+      channelName: "general",
+      content: "single-return live sentinel",
+      createdAt: 1_800_000_000,
+    });
+  });
+  await expect(page.getByText("single-return live sentinel")).toBeVisible();
+  await expect(page.getByTestId("message-scroll-to-latest")).toHaveCount(0);
 });
