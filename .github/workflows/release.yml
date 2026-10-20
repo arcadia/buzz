@@ -676,7 +676,7 @@ jobs:
         shell: bash
         run: scripts/verify-release-ref.sh desktop-v "$VERSION"
 
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+      - uses: dtolnay/rust-toolchain@f08ac54821369508305fcb9e0121ec6e30ae9ada # 1.97.0
         with:
           targets: ${{ env.TARGET }}
 

@@ -3,6 +3,7 @@
 import asyncio
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -18,6 +19,8 @@ _spec.loader.exec_module(benchmark)
 
 @pytest.fixture
 def state_dir(tmp_path, monkeypatch):
+    if os.name != "posix":
+        pytest.skip("Local benchmark credentials require a POSIX filesystem")
     monkeypatch.setattr(benchmark, "STATE_DIR", tmp_path / ".benchmark")
     return tmp_path / ".benchmark"
 

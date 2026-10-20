@@ -28,7 +28,6 @@ impl Request {
 }
 pub(super) enum Reply {
     Json(u16, serde_json::Value),
-    #[cfg(unix)]
     Raw(String),
     #[cfg(unix)]
     Stall,
@@ -203,7 +202,6 @@ async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
             let body = body.to_string();
             format!("HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
         }
-        #[cfg(unix)]
         Reply::Raw(raw) => raw,
         #[cfg(unix)]
         Reply::Stall => {

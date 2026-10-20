@@ -40,16 +40,24 @@ function textWithoutAttachments(event: LiveTtsEvent): string {
       ),
   );
   if (urls.size === 0) return event.content;
-  const withoutMedia = event.content
+  const lines = event.content
     .split("\n")
     .filter(
       (line) => !Array.from(urls).some((url) => line.includes(`](${url})`)),
-    )
-    .join("\n");
-  return withoutMedia.replace(
-    /(^|\n)\s*\|\|\s*\n(?:\s*\n)*\s*\|\|\s*(?=\n|$)/gu,
-    "$1",
-  );
+    );
+  const withoutEmptySpoilers: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index].trim() === "||") {
+      let end = index + 1;
+      while (end < lines.length && lines[end].trim() === "") end += 1;
+      if (end < lines.length && lines[end].trim() === "||") {
+        index = end;
+        continue;
+      }
+    }
+    withoutEmptySpoilers.push(lines[index]);
+  }
+  return withoutEmptySpoilers.join("\n");
 }
 
 export function classifySpeakableAgentText(

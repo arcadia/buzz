@@ -1,0 +1,82 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main, release]
+  pull_request:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            runner: ubuntu-latest
+            build-mode: none
+          - language: c-cpp
+            runner: ubuntu-latest
+            build-mode: none
+          - language: java-kotlin
+            runner: ubuntu-latest
+            build-mode: manual
+          - language: javascript-typescript
+            runner: ubuntu-latest
+            build-mode: none
+          - language: python
+            runner: ubuntu-latest
+            build-mode: none
+          - language: ruby
+            runner: ubuntu-latest
+            build-mode: none
+          - language: rust
+            runner: ubuntu-latest
+            build-mode: none
+          - language: swift
+            runner: macos-latest
+            build-mode: manual
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      # Flutter's nested Android project is not discovered by CodeQL autobuild.
+      # Use the same pinned toolchain and native build commands as client CI.
+      - name: Activate mobile toolchain
+        if: matrix.build-mode == 'manual'
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Install mobile dependencies
+        if: matrix.build-mode == 'manual'
+        run: cd mobile && flutter pub get
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@f051dc808ef3645eb0d08647ec751634ec2304ac # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - name: Build Android
+        if: matrix.language == 'java-kotlin'
+        run: just mobile-build-android
+      - name: Build Swift package and iOS app
+        if: matrix.language == 'swift'
+        run: |
+          swift build --package-path mobile/ios/BuzzPushKit
+          cd mobile && flutter build ios --release --no-codesign --no-pub
+      - name: Analyze
+        uses: github/codeql-action/analyze@f051dc808ef3645eb0d08647ec751634ec2304ac # v4
+        with:
+          category: /language:${{ matrix.language }}
