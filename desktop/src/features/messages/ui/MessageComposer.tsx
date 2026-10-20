@@ -483,9 +483,10 @@ function MessageComposerImpl({
   addressedMentionRestore.restoreAddressedAgentMentionsRef.current =
     restoreAddressedAgentMentions;
   React.useLayoutEffect(() => {
-    if (!audienceScope || editTarget != null) return;
+    // Provenance must describe text inserted into the restored live editor.
+    if (!editorReady || !audienceScope || editTarget != null) return;
     restoreAddressedAgentMentions();
-  }, [audienceScope, editTarget, restoreAddressedAgentMentions]);
+  }, [audienceScope, editTarget, editorReady, restoreAddressedAgentMentions]);
   syncAddressedAgentsFromTextRef.current = syncAddressedAgentsFromText;
   const applyChannelInsert = React.useCallback(
     (suggestion: ChannelSuggestion) => {
