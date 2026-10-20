@@ -45,7 +45,7 @@ def digest(path):
     return hashlib.sha256((ROOT / path).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
-def mobile_notices():
+def flutter_asset_notices():
     return SEPARATOR.join(f"{name}\n\n{read(path)}" for name, path in MOBILE_LICENSES)
 
 
@@ -152,7 +152,7 @@ def main():
     parser.add_argument("--cargo-about", default="cargo-about")
     parser.add_argument("--mobile-only", action="store_true")
     args = parser.parse_args()
-    write("mobile/NOTICES", mobile_notices())
+    write("mobile/NOTICES", flutter_asset_notices())
     if args.mobile_only:
         print("Updated mobile/NOTICES")
         return
