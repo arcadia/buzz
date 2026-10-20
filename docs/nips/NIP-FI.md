@@ -236,7 +236,7 @@ Each issuer policy configures:
   fragment. DNS address checks and pinning are specified under
   [Security considerations](#security-considerations).
 - `jwks_transport`: optional per-issuer transport, defaulting to
-  `public_https`. The explicit value `mesh` permits an HTTP URI only when it
+  `public_https`. The explicit value `mesh` requires an HTTPS URI that
   uses a DNS hostname rather than an IP literal and has no userinfo, query,
   fragment, or backslash. The only accepted IPv4 ranges are RFC 1918 (`10/8`,
   `172.16/12`, and `192.168/16`), CGNAT (`100.64/10`), reserved `240/4` except
@@ -247,12 +247,11 @@ Each issuer policy configures:
   Every DNS answer is checked and the first allowed address is pinned. Empty or
   mixed answers deny the fetch. Loopback is accepted for isolated local use;
   in production it can reach services on the relay host, so operators MUST
-  constrain endpoint selection and egress accordingly. Mesh transport does not
-  authenticate itself: selecting it is an operator assertion that the
-  deployment enforces mutual TLS peer authentication and integrity protection,
-  endpoint authorization, and egress restrictions. The relay cannot verify
-  those properties. Unauthenticated HTTP permits JWKS key substitution and
-  issuer impersonation. There is no public-network fallback.
+  constrain endpoint selection and egress accordingly. Both modes MUST verify
+  TLS certificate chains and hostnames against trusted roots. Private services
+  must present certificates trusted by the relay; TLS verification cannot be
+  disabled. HTTP configurations MUST fail before network I/O, including in
+  `mesh` mode. There is no cleartext or public-network fallback.
 - `refresh_interval_seconds`: positive, ≤ 1 year, strictly less than
   `key_snapshot_hard_deadline_seconds`.
 - `key_snapshot_hard_deadline_seconds`: the outer time bound after which no
@@ -1001,8 +1000,8 @@ resolved address on its IP deny-list, pin the checked address to prevent DNS
 rebinding, and deny redirects. The IP deny-list covers the complete IANA
 Special-Purpose address registry. The `mesh` address allow-list and operator
 security boundary are defined in the [JWKS snapshot contract](#jwks-snapshot).
-Both modes MUST resolve once, validate every answer before pinning the first
-permitted address, disable proxies, deny redirects, enforce a 10-second
+Both modes MUST require authenticated HTTPS, resolve once, validate every answer
+before pinning the first permitted address, disable proxies, deny redirects, enforce a 10-second
 whole-fetch deadline, cap the streamed response at 512 KiB, reject non-2xx
 responses, and provide no fallback network path.
 

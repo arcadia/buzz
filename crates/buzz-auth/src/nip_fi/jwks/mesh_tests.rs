@@ -2,6 +2,14 @@
 
 use super::*;
 
+#[path = "../../../tests/support/jwks_tls.rs"]
+mod tls;
+
+fn trusted_fetcher(tls: &tls::TlsFixture) -> HttpJwksFetcher {
+    HttpJwksFetcher::new()
+        .with_root_certificate(reqwest::Certificate::from_der(&tls.root_der).unwrap())
+}
+
 fn minimal_jwks_json(kid: &str) -> String {
     format!(
         r#"{{"keys":[{{"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0","use":"sig","alg":"ES256","kid":"{kid}"}}]}}"#
@@ -15,19 +23,19 @@ fn mesh_contract(uri: &str) -> JwksSourceContract {
 #[test]
 fn mesh_contract_rejects_invalid_uri_and_timing() {
     for uri in [
-        "https://mesh.example.test/jwks.json",
-        "http://127.0.0.1/jwks.json",
-        "http://[::1]/jwks.json",
-        "http://2130706433/jwks.json",
-        "http://0177.0.0.1/jwks.json",
-        "http://0x7f000001/jwks.json",
-        "http://user:password@mesh.example.test/jwks.json",
-        "http://@mesh.example.test/jwks.json",
-        "http://mesh.example.test/jwks.json?token=private",
-        "http://mesh.example.test/jwks.json?",
-        "http://mesh.example.test/jwks.json#fragment",
-        "http://mesh.example.test/jwks.json#",
-        "http:\\\\mesh.example.test\\jwks.json",
+        "http://mesh.example.test/jwks.json",
+        "https://127.0.0.1/jwks.json",
+        "https://[::1]/jwks.json",
+        "https://2130706433/jwks.json",
+        "https://0177.0.0.1/jwks.json",
+        "https://0x7f000001/jwks.json",
+        "https://user:password@mesh.example.test/jwks.json",
+        "https://@mesh.example.test/jwks.json",
+        "https://mesh.example.test/jwks.json?token=private",
+        "https://mesh.example.test/jwks.json?",
+        "https://mesh.example.test/jwks.json#fragment",
+        "https://mesh.example.test/jwks.json#",
+        "https:\\\\mesh.example.test\\jwks.json",
     ] {
         assert!(
             JwksSourceContract::new_mesh(uri.to_owned(), 300, 3600).is_none(),
@@ -35,7 +43,7 @@ fn mesh_contract_rejects_invalid_uri_and_timing() {
         );
     }
 
-    let uri = "http://mesh.example.test/jwks.json".to_owned();
+    let uri = "https://mesh.example.test/jwks.json".to_owned();
     for (refresh, deadline) in [
         (0, 3600),
         (300, 0),
@@ -55,16 +63,19 @@ fn mesh_contract_rejects_invalid_uri_and_timing() {
     );
 
     assert!(
-        JwksSourceContract::new(uri, 300, 3600).is_none(),
+        JwksSourceContract::new("http://mesh.example.test/jwks.json".into(), 300, 3600).is_none(),
         "the public constructor must keep rejecting HTTP"
     );
 }
 
 #[test]
 fn mesh_contract_canonicalizes_and_transport_participates_in_equality() {
-    let canonical = mesh_contract("http://mesh.example.test/a/jwks.json");
-    let equivalent = mesh_contract("HTTP://MESH.EXAMPLE.TEST:80/a/./jwks.json");
-    assert_eq!(canonical.jwks_uri(), "http://mesh.example.test/a/jwks.json");
+    let canonical = mesh_contract("https://mesh.example.test/a/jwks.json");
+    let equivalent = mesh_contract("HTTPS://MESH.EXAMPLE.TEST:443/a/./jwks.json");
+    assert_eq!(
+        canonical.jwks_uri(),
+        "https://mesh.example.test/a/jwks.json"
+    );
     assert_eq!(canonical, equivalent);
 
     let public = JwksSourceContract::new(
@@ -247,7 +258,7 @@ async fn bind_localhost_listener() -> tokio::net::TcpListener {
     tokio::net::TcpListener::from_std(listener).expect("register listener with Tokio")
 }
 
-async fn read_http_request(stream: &mut tokio::net::TcpStream) -> String {
+async fn read_http_request(stream: &mut (impl tokio::io::AsyncRead + Unpin)) -> String {
     use tokio::io::AsyncReadExt as _;
 
     let mut bytes = Vec::new();
@@ -263,7 +274,7 @@ async fn read_http_request(stream: &mut tokio::net::TcpStream) -> String {
 }
 
 async fn write_http_response(
-    stream: &mut tokio::net::TcpStream,
+    stream: &mut (impl tokio::io::AsyncWrite + Unpin),
     status: &str,
     headers: &str,
     body: &str,
@@ -281,10 +292,71 @@ async fn write_http_response(
 }
 
 #[tokio::test]
+async fn mesh_http_is_rejected_before_network_io() {
+    let listener = bind_localhost_listener().await;
+    let port = listener.local_addr().unwrap().port();
+    let uri = format!("http://localhost:{port}/jwks.json");
+    assert!(JwksSourceContract::new_mesh(uri.clone(), 300, 3600).is_none());
+    // Also exercise the I/O boundary if a future internal caller supplies an
+    // invalid contract without going through the public constructor.
+    let mut contract = mesh_contract(&format!("https://localhost:{port}/jwks.json"));
+    contract.jwks_uri = uri.clone();
+    let fetcher = HttpJwksFetcher::new();
+    tokio::select! {
+        result = fetcher.fetch_for_contract(&contract) => {
+            assert_eq!(result, Err(JwksFetchError::InvalidUri));
+        }
+        accepted = listener.accept() => {
+            panic!("HTTP must fail before a connection: {accepted:?}");
+        }
+    }
+    assert_eq!(
+        HttpJwksFetcher::new().fetch_jwks(&uri).await,
+        Err(JwksFetchError::InvalidUri)
+    );
+}
+
+#[tokio::test]
+async fn mesh_https_verifies_certificate_trust_and_hostname() {
+    for trust_root in [false, true] {
+        let tls = tls::TlsFixture::new();
+        let fetcher = if trust_root {
+            trusted_fetcher(&tls)
+        } else {
+            HttpJwksFetcher::new()
+        };
+        let listener = bind_localhost_listener().await;
+        let address = listener.local_addr().unwrap();
+        let host = if trust_root {
+            "wrong-host.example.test"
+        } else {
+            "localhost"
+        };
+        let contract = mesh_contract(&format!("https://{host}:{}/jwks.json", address.port()));
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            assert!(
+                tls.acceptor.accept(stream).await.is_err(),
+                "the client must reject the TLS handshake before sending HTTP"
+            );
+        });
+        assert_eq!(
+            TEST_DNS_ANSWERS
+                .scope(vec![address.ip()], fetcher.fetch_for_contract(&contract))
+                .await,
+            Err(JwksFetchError::NetworkError)
+        );
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn production_source_fetches_mesh_contract_and_raw_fetch_stays_public_only() {
+    let tls = tls::TlsFixture::new();
+    let fetcher = trusted_fetcher(&tls);
     let listener = bind_localhost_listener().await;
     let port = listener.local_addr().expect("listener address").port();
-    let uri = format!("http://localhost:{port}/.well-known/jwks.json");
+    let uri = format!("https://localhost:{port}/.well-known/jwks.json");
     let contract = mesh_contract(&uri);
     let issuer = "https://issuer.example";
     let public_issuer = "https://public-issuer.example";
@@ -305,12 +377,12 @@ async fn production_source_fetches_mesh_contract_and_raw_fetch_stays_public_only
                 contract: public_contract,
             },
         ],
-        HttpJwksFetcher::new(),
+        fetcher.clone(),
     )
     .expect("valid mixed-transport source");
     let body = minimal_jwks_json("mesh-key");
     let server = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.expect("accept JWKS request");
+        let mut stream = tls.accept(&listener).await;
         let request = read_http_request(&mut stream).await;
         write_http_response(
             &mut stream,
@@ -336,10 +408,10 @@ async fn production_source_fetches_mesh_contract_and_raw_fetch_stays_public_only
     assert_eq!(
         HttpJwksFetcher::new().fetch_jwks(&uri).await.unwrap_err(),
         JwksFetchError::InvalidUri,
-        "raw fetches cannot inherit the contract's HTTP permission"
+        "raw fetches cannot inherit the contract's private-address permission"
     );
     assert!(
-        JwksSourceContract::new(uri, 300, 3600).is_none(),
+        JwksSourceContract::new(uri.replacen("https:", "http:", 1), 300, 3600).is_none(),
         "the public constructor cannot create an HTTP contract"
     );
 
@@ -357,13 +429,15 @@ async fn production_source_fetches_mesh_contract_and_raw_fetch_stays_public_only
 async fn production_mesh_fetcher_checks_all_dns_answers_before_connecting() {
     use std::net::IpAddr;
 
+    let tls = tls::TlsFixture::new();
+    let fetcher = trusted_fetcher(&tls);
     let listener = bind_localhost_listener().await;
     let address = listener.local_addr().expect("listener address");
-    let uri = format!("http://mesh.example.test:{}/jwks.json", address.port());
+    let uri = format!("https://mesh.example.test:{}/jwks.json", address.port());
     let contract = mesh_contract(&uri);
     let body = minimal_jwks_json("mixed-answer-key");
     let server = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.expect("accept fetcher request");
+        let mut stream = tls.accept(&listener).await;
         let request = read_http_request(&mut stream).await;
         write_http_response(&mut stream, "200 OK", "", &body).await;
         request
@@ -375,7 +449,7 @@ async fn production_mesh_fetcher_checks_all_dns_answers_before_connecting() {
                 address.ip(),
                 IpAddr::V4(std::net::Ipv4Addr::new(8, 8, 8, 8)),
             ],
-            HttpJwksFetcher::new().fetch_for_contract(&contract),
+            fetcher.fetch_for_contract(&contract),
         )
         .await;
     assert_eq!(
@@ -390,56 +464,54 @@ async fn production_mesh_fetcher_checks_all_dns_answers_before_connecting() {
 
 #[tokio::test]
 async fn production_mesh_fetcher_denies_redirects_and_non_success_statuses() {
+    let tls = tls::TlsFixture::new();
+    let fetcher = trusted_fetcher(&tls);
     let listener = bind_localhost_listener().await;
     let port = listener.local_addr().expect("listener address").port();
-    let uri = format!("http://localhost:{port}/jwks.json");
+    let uri = format!("https://localhost:{port}/jwks.json");
     let contract = mesh_contract(&uri);
     let target_body = minimal_jwks_json("redirect-target");
     let server = tokio::spawn(async move {
-        let (mut first, _) = listener.accept().await.expect("accept first request");
+        let mut first = tls.accept(&listener).await;
         let first_request = read_http_request(&mut first).await;
         write_http_response(
             &mut first,
             "302 Found",
-            &format!("Location: http://localhost:{port}/target\r\n"),
+            &format!("Location: https://localhost:{port}/target\r\n"),
             "",
         )
         .await;
 
         // If redirects are followed, this second response makes that behavior
         // observable as a successful fetch instead of a network failure.
-        let (mut second, _) = listener.accept().await.expect("accept redirect target");
+        let mut second = tls.accept(&listener).await;
         let second_request = read_http_request(&mut second).await;
         write_http_response(&mut second, "200 OK", "", &target_body).await;
         (first_request, second_request)
     });
 
     assert_eq!(
-        HttpJwksFetcher::new()
-            .fetch_for_contract(&contract)
-            .await
-            .unwrap_err(),
+        fetcher.fetch_for_contract(&contract).await.unwrap_err(),
         JwksFetchError::NetworkError,
         "3xx responses are rejected without following Location"
     );
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
 
+    let tls = tls::TlsFixture::new();
+    let fetcher = trusted_fetcher(&tls);
     let listener = bind_localhost_listener().await;
     let port = listener.local_addr().expect("listener address").port();
-    let uri = format!("http://localhost:{port}/jwks.json");
+    let uri = format!("https://localhost:{port}/jwks.json");
     let contract = mesh_contract(&uri);
     let server = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.expect("accept non-2xx request");
+        let mut stream = tls.accept(&listener).await;
         let request = read_http_request(&mut stream).await;
         write_http_response(&mut stream, "503 Service Unavailable", "", "").await;
         request
     });
     assert_eq!(
-        HttpJwksFetcher::new()
-            .fetch_for_contract(&contract)
-            .await
-            .unwrap_err(),
+        fetcher.fetch_for_contract(&contract).await.unwrap_err(),
         JwksFetchError::NetworkError
     );
     let request = server.await.expect("non-2xx server task");
@@ -450,17 +522,17 @@ async fn production_mesh_fetcher_denies_redirects_and_non_success_statuses() {
 async fn production_fetch_wrapper_deadline_covers_waiting_for_response() {
     use std::time::Duration;
 
+    let tls = tls::TlsFixture::new();
+    let fetcher = trusted_fetcher(&tls);
     let listener = bind_localhost_listener().await;
     let port = listener.local_addr().expect("listener address").port();
-    let uri = format!("http://localhost:{port}/jwks.json");
+    let uri = format!("https://localhost:{port}/jwks.json");
     let contract = mesh_contract(&uri);
-    let fetch =
-        tokio::spawn(async move { HttpJwksFetcher::new().fetch_for_contract(&contract).await });
+    let fetch = tokio::spawn(async move { fetcher.fetch_for_contract(&contract).await });
 
-    let (mut stream, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
+    let mut stream = tokio::time::timeout(Duration::from_secs(2), tls.accept(&listener))
         .await
-        .expect("fetcher should connect before its whole-request deadline")
-        .expect("accept request");
+        .expect("fetcher should connect before its whole-request deadline");
     let request = tokio::time::timeout(Duration::from_secs(2), read_http_request(&mut stream))
         .await
         .expect("fetcher should send request headers before waiting for response");
@@ -485,13 +557,15 @@ async fn production_fetch_wrapper_deadline_covers_waiting_for_response() {
 
 #[tokio::test]
 async fn production_mesh_fetcher_keeps_response_cap() {
+    let tls = tls::TlsFixture::new();
+    let fetcher = trusted_fetcher(&tls);
     let listener = bind_localhost_listener().await;
     let port = listener.local_addr().expect("listener address").port();
-    let uri = format!("http://localhost:{port}/jwks.json");
+    let uri = format!("https://localhost:{port}/jwks.json");
     let contract = mesh_contract(&uri);
     let oversized_body = vec![b'x'; MAX_JWKS_RESPONSE_BYTES + 1];
     let server = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.expect("accept oversized request");
+        let mut stream = tls.accept(&listener).await;
         let request = read_http_request(&mut stream).await;
         use tokio::io::AsyncWriteExt as _;
         stream
@@ -505,10 +579,7 @@ async fn production_mesh_fetcher_keeps_response_cap() {
         request
     });
     assert_eq!(
-        HttpJwksFetcher::new()
-            .fetch_for_contract(&contract)
-            .await
-            .unwrap_err(),
+        fetcher.fetch_for_contract(&contract).await.unwrap_err(),
         JwksFetchError::ResponseTooLarge
     );
     let request = server.await.expect("oversized response server task");

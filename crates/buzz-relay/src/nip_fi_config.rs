@@ -73,20 +73,18 @@ const MAX_CONNECTION_LIFETIME_SECS: u64 = 30 * 24 * 3600;
 /// ]
 /// ```
 /// `jwks_transport` is optional and defaults to `public_https`. The `mesh`
-/// form requires an HTTP URI with a DNS hostname (not an IP literal) and no
+/// form requires an HTTPS URI with a DNS hostname (not an IP literal) and no
 /// userinfo, query, fragment, or backslash. Every DNS answer is checked
 /// against the positive address allow-list in the
 /// [NIP-FI JWKS snapshot contract](../../../docs/nips/NIP-FI.md#jwks-snapshot);
 /// empty or mixed answers deny, and the first checked address is pinned.
-/// Selecting `mesh` is an operator assertion: the deployment must enforce
-/// mutual TLS peer authentication and integrity protection, authorize the
-/// JWKS endpoint, and restrict egress. The relay cannot verify those
-/// properties, and unauthenticated HTTP permits key substitution and issuer
-/// impersonation.
+/// Both modes verify TLS certificates and hostnames against trusted roots.
+/// Operators must authorize the JWKS endpoint and restrict egress. Cleartext
+/// HTTP configurations fail validation before any connection is attempted.
 ///
 /// For example:
 /// ```json
-/// { "jwks_uri": "http://mesh.example.test/.well-known/jwks.json",
+/// { "jwks_uri": "https://mesh.example.test/.well-known/jwks.json",
 ///   "jwks_transport": "mesh" }
 /// ```
 /// The `require_attested_key` field is not part of this schema; S2 removed it
@@ -111,8 +109,7 @@ pub(super) struct IssuerEnvConfig {
     pub skew_seconds: u64,
     /// `iat + maximum_assertion_age` residual bound in seconds.
     pub maximum_assertion_age_seconds: u64,
-    /// JWK Set endpoint for this issuer; HTTPS by default, or HTTP with the
-    /// explicitly selected mesh transport and its
+    /// HTTPS JWK Set endpoint for this issuer. Explicit mesh mode uses its
     /// [NIP-FI address allow-list](../../../docs/nips/NIP-FI.md#jwks-snapshot).
     pub jwks_uri: String,
     /// Per-issuer JWKS transport. Unknown values are rejected during parsing.
@@ -957,7 +954,7 @@ mod tests {
         let public = valid_enforce_issuer();
         let mut mesh = valid_enforce_issuer();
         mesh["issuer"] = "https://mesh-issuer.test".into();
-        mesh["jwks_uri"] = "http://mesh.example.test/.well-known/jwks.json".into();
+        mesh["jwks_uri"] = "https://mesh.example.test/.well-known/jwks.json".into();
         mesh["jwks_transport"] = "mesh".into();
 
         std::env::set_var("BUZZ_NIP_FI_MODE", "enforce");
@@ -980,7 +977,7 @@ mod tests {
         )
         .expect("valid public contract");
         let mesh_contract = JwksSourceContract::new_mesh(
-            "http://mesh.example.test/.well-known/jwks.json".to_owned(),
+            "https://mesh.example.test/.well-known/jwks.json".to_owned(),
             300,
             3600,
         )
@@ -1022,18 +1019,17 @@ mod tests {
         let mut implicit_http = valid_enforce_issuer();
         implicit_http["jwks_uri"] = "http://sentinel-uri.example.test/jwks".into();
         set_issuers(serde_json::json!([implicit_http]).to_string());
-        let error = NipFiRelayConfig::from_env()
-            .expect_err("HTTP without an explicit mesh transport must fail");
+        let error = NipFiRelayConfig::from_env().expect_err("public transport must reject HTTP");
         let message = error.to_string();
         assert!(message.contains("invalid JWKS source contract"));
         assert!(!message.contains("sentinel-uri.example.test"));
 
         let mut wrong_scheme = valid_enforce_issuer();
-        wrong_scheme["jwks_uri"] = "https://sentinel-uri.example.test/jwks".into();
+        wrong_scheme["jwks_uri"] = "http://sentinel-uri.example.test/jwks".into();
         wrong_scheme["jwks_transport"] = "mesh".into();
         set_issuers(serde_json::json!([wrong_scheme]).to_string());
         let error =
-            NipFiRelayConfig::from_env().expect_err("mesh transport must reject HTTPS scheme");
+            NipFiRelayConfig::from_env().expect_err("mesh transport must reject HTTP scheme");
         let message = error.to_string();
         assert!(message.contains("invalid JWKS source contract"));
         assert!(!message.contains("sentinel-uri.example.test"));

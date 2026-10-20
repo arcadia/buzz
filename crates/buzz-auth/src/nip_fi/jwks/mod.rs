@@ -112,9 +112,8 @@ pub fn validate_jwks_uri(uri: &str) -> Result<(), JwksFetchError> {
 /// detects any mismatch that a compatibility path temporarily introduces.
 ///
 /// All fields are validated at construction — an invalid value is caught at
-/// configuration time, not at first token verification. The mesh constructor
-/// is an operator assertion: this process cannot prove that mutual TLS peer
-/// authentication and integrity protection are enabled. See the
+/// configuration time, not at first token verification. Both modes require
+/// HTTPS; mesh mode selects a separate private-address policy. See the
 /// [NIP-FI JWKS snapshot contract](../../../../../docs/nips/NIP-FI.md#jwks-snapshot)
 /// for the exact mesh address allow-list and operator requirements.
 ///
@@ -149,8 +148,7 @@ pub struct JwksSourceContract {
 enum JwksTransport {
     /// Public HTTPS with the strict shared public-address SSRF policy.
     PublicHttps,
-    /// HTTP selected by explicit mesh mode; transport authentication is an
-    /// operator responsibility.
+    /// HTTPS with the explicit private-address mesh policy.
     Mesh,
 }
 
@@ -177,21 +175,18 @@ impl JwksSourceContract {
         )
     }
 
-    /// Validate and seal a mesh HTTP JWKS source.
+    /// Validate and seal a mesh HTTPS JWKS source.
     ///
-    /// The URI must use HTTP and a DNS hostname rather than an IP literal. It
+    /// The URI must use HTTPS and a DNS hostname rather than an IP literal. It
     /// must have no userinfo (including an empty userinfo marker), query,
     /// fragment, or backslash. Every DNS answer is checked before the first
     /// allowed address is pinned; empty or mixed answers fail closed. See the
     /// [NIP-FI JWKS snapshot contract](../../../../../docs/nips/NIP-FI.md#jwks-snapshot)
     /// for the exact address allow-list and operator requirements.
     ///
-    /// Selecting this mode is an operator assertion that the deployment
-    /// authenticates and protects the HTTP transport. The relay cannot verify
-    /// that assertion. Operators must enforce mutual TLS peer authentication
-    /// and integrity protection, authorize the endpoint, and restrict egress;
-    /// unauthenticated HTTP permits JWKS key substitution and issuer
-    /// impersonation.
+    /// TLS verifies the endpoint certificate and hostname against trusted roots.
+    /// Operators must still authorize the endpoint and restrict egress to the
+    /// intended private service. Mesh mode never permits cleartext HTTP.
     pub fn new_mesh(
         jwks_uri: String,
         refresh_interval_seconds: u64,
@@ -250,7 +245,7 @@ impl JwksSourceContract {
         &self.jwks_uri
     }
 
-    /// Whether this issuer explicitly selects mesh HTTP transport.
+    /// Whether this issuer explicitly selects the mesh address policy.
     pub const fn uses_mesh_transport(&self) -> bool {
         matches!(self.transport, JwksTransport::Mesh)
     }
@@ -278,7 +273,7 @@ fn validate_jwks_uri_for_transport(
 
 fn validate_mesh_jwks_uri(uri: &str) -> Result<(), JwksFetchError> {
     let parsed = Url::parse(uri).map_err(|_| JwksFetchError::InvalidUri)?;
-    if parsed.scheme() != "http"
+    if parsed.scheme() != "https"
         || uri.trim() != uri
         || uri.chars().any(char::is_control)
         || uri.contains('\\')
@@ -309,7 +304,7 @@ fn authority_contains_userinfo(uri: &str) -> bool {
     let Some((scheme, after_scheme)) = uri.split_once("://") else {
         return true;
     };
-    if !scheme.eq_ignore_ascii_case("http") {
+    if !scheme.eq_ignore_ascii_case("https") {
         return true;
     }
     let authority = after_scheme
@@ -555,7 +550,7 @@ pub trait JwksFetcher: super::verifier::sealed::Sealed + Send + Sync + 'static {
 /// fetch builds a dedicated pinned client, with no shared connection state.
 ///
 /// Per-fetch boundary enforcement:
-/// - public HTTPS retains its strict address deny-list; explicit mesh HTTP
+/// - both modes require authenticated HTTPS; explicit mesh mode
 ///   checks addresses against the allow-list in the
 ///   [NIP-FI JWKS snapshot contract](../../../../../docs/nips/NIP-FI.md#jwks-snapshot);
 /// - every DNS answer is validated, then the first permitted address is pinned
@@ -568,14 +563,26 @@ pub trait JwksFetcher: super::verifier::sealed::Sealed + Send + Sync + 'static {
 /// - the body is streamed incrementally and stopped at
 ///   [`MAX_JWKS_RESPONSE_BYTES`] + 1.
 #[derive(Clone, Debug)]
-pub struct HttpJwksFetcher;
+pub struct HttpJwksFetcher {
+    additional_roots: Vec<reqwest::Certificate>,
+}
 
 impl HttpJwksFetcher {
     /// Builds a new fetcher. Security invariants are enforced per-request in
     /// `fetch_jwks` and `fetch_for_contract` — each call constructs a dedicated
     /// pinned client.
     pub fn new() -> Self {
-        Self
+        Self {
+            additional_roots: Vec::new(),
+        }
+    }
+
+    /// Trust an additional certificate authority for private HTTPS endpoints.
+    /// Certificate-chain and hostname verification remain enabled. Default
+    /// platform roots are retained; callers must authorize the added authority.
+    pub fn with_root_certificate(mut self, certificate: reqwest::Certificate) -> Self {
+        self.additional_roots.push(certificate);
+        self
     }
 }
 
@@ -608,7 +615,7 @@ impl HttpJwksFetcher {
         transport: JwksTransport,
     ) -> Result<String, JwksFetchError> {
         with_deadline(
-            fetch_jwks_inner_with_transport(uri, transport),
+            fetch_jwks_inner_with_transport(uri, transport, &self.additional_roots),
             std::time::Duration::from_secs(JWKS_REQUEST_TIMEOUT_SECS),
         )
         .await
@@ -672,9 +679,10 @@ pub(crate) fn extract_url_host_and_port(uri: &str) -> Result<(String, u16), Jwks
 async fn fetch_jwks_inner_with_transport(
     uri: &str,
     transport: JwksTransport,
+    additional_roots: &[reqwest::Certificate],
 ) -> Result<String, JwksFetchError> {
-    // Validate again at the I/O boundary. Raw calls always use public HTTPS;
-    // only the sealed contract method can select mesh HTTP.
+    // Validate again at the I/O boundary. Both modes require HTTPS; only a
+    // sealed mesh contract can select the private-address policy.
     validate_jwks_uri_for_transport(uri, transport)?;
 
     let (host, port) = extract_url_host_and_port(uri)?;
@@ -688,6 +696,8 @@ async fn fetch_jwks_inner_with_transport(
     // - has no system proxy (proxy would resolve the original hostname itself);
     // - pins this request to the validated IP.
     let pinned_client = reqwest::Client::builder()
+        .https_only(true)
+        .tls_certs_merge(additional_roots.iter().cloned())
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
         .resolve(&host, std::net::SocketAddr::new(safe_ip, port))
