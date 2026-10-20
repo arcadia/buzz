@@ -1,4 +1,5 @@
 import * as React from "react";
+import { toast } from "sonner";
 
 import {
   canSendAgentPermissionDecision,
@@ -9,6 +10,11 @@ import { useIdentityQuery } from "@/shared/api/hooks";
 import { useFeedbackToasts } from "@/shared/hooks/useToastEffect";
 import { useStableMap } from "@/shared/hooks/useStableReference";
 import { useAgentWorking } from "@/features/agents/agentWorkingSignal";
+import { awaitCancelTurnOutcome } from "@/features/agents/lib/cancelTurnOutcome";
+import {
+  ensureRelayObserverSubscription,
+  subscribeControlResults,
+} from "@/features/agents/observerRelayStore";
 import {
   buildTurnRequesterIndex,
   canStopPermissionTurn,
@@ -245,14 +251,40 @@ export function AgentPermissionDecisionProvider({
     if (!channelId) return;
     void (async () => {
       try {
-        await cancelManagedAgentTurn(agentPubkey, channelId);
-        setErrorMessage(null);
-        setNoticeMessage(
+        const requestId = crypto.randomUUID();
+        const outcome = await awaitCancelTurnOutcome({
+          requestId,
+          channelId,
+          subscribe: (listener) =>
+            subscribeControlResults(agentPubkey, listener),
+          sendCancel: async () => {
+            await ensureRelayObserverSubscription();
+            await cancelManagedAgentTurn(agentPubkey, channelId, requestId);
+          },
+          scheduleTimeout: (onTimeout) => {
+            const timeout = window.setTimeout(onTimeout, 8_000);
+            return () => window.clearTimeout(timeout);
+          },
+        });
+        if (outcome === "ambiguous_target") {
+          toast.error(
+            "This channel has multiple agent sessions. Stopping a specific thread isn't available here yet.",
+          );
+          return;
+        }
+        if (outcome === "no_active_turn") {
+          toast.info("No active turn to stop.");
+          return;
+        }
+        if (outcome === "unconfirmed") {
+          toast.info("Stop requested, but the agent hasn't confirmed it.");
+          return;
+        }
+        toast.success(
           `Stop signal sent to ${agentName}. It may take a moment to respond.`,
         );
       } catch (error) {
-        setNoticeMessage(null);
-        setErrorMessage(
+        toast.error(
           error instanceof Error
             ? error.message
             : `Failed to stop ${agentName}'s current turn.`,

@@ -34,7 +34,7 @@ export function PromptContextDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="max-w-xl overflow-hidden p-0">
-        <div className="flex max-h-[85vh] flex-col">
+        <div className="flex max-h-[85vh] min-w-0 flex-col">
           <DialogHeader className="px-6 pb-3 pt-5 pr-14">
             <DialogTitle>Prompt context</DialogTitle>
             {setupText ? (

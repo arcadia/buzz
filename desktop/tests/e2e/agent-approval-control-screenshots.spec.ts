@@ -422,6 +422,58 @@ test.describe("agent approval control", () => {
     });
   });
 
+  for (const scenario of [
+    { status: "sent", message: /Stop signal sent to Observer Agent/ },
+    { status: "no_active_turn", message: /No active turn to stop/ },
+    { status: "ambiguous_target", message: /multiple agent sessions/ },
+    {
+      status: "sent",
+      requestId: "stale-request",
+      message: /hasn't confirmed it/,
+    },
+  ]) {
+    test(`permission Stop awaits ${scenario.requestId ?? scenario.status}`, async ({
+      page,
+    }) => {
+      await installMockBridge(page, {
+        managedAgents: MANAGED_AGENTS,
+        observerControlResults: [
+          {
+            type: "cancel_turn",
+            status: scenario.status,
+            requestId: scenario.requestId,
+          },
+        ],
+      });
+      const panel = await openObserverFeedPanel(page, OBSERVER_AGENT_PUBKEY);
+      await seedPending(page, await viewerPubkey(page));
+      await expectPermissionBlock(panel);
+      const stop = panel.getByTestId("transcript-permission-stop");
+      await expect(stop).toBeVisible();
+      await stop.click();
+      await expect
+        .poll(() => page.evaluate(() => window.__BUZZ_E2E_OBSERVER_CONTROLS__))
+        .toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              agentPubkey: OBSERVER_AGENT_PUBKEY,
+              payload: expect.objectContaining({
+                type: "cancel_turn",
+                channelId: CHANNEL_ID,
+                requestId: expect.any(String),
+              }),
+            }),
+          ]),
+        );
+      await expect(page.getByText(scenario.message)).toBeVisible({
+        timeout: 10_000,
+      });
+      if (scenario.status !== "sent" || scenario.requestId) {
+        await expect(page.getByText(/Stop signal sent/)).toHaveCount(0);
+      }
+    });
+  }
+
   for (const theme of ["light", "dark"] as const) {
     const suffix = theme === "dark" ? "-dark" : "";
 
