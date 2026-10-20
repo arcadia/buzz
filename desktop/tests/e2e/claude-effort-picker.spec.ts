@@ -135,20 +135,35 @@ async function payloadsFor(page: Page, command: string) {
   );
 }
 
+async function openMenu(page: Page, trigger: Locator) {
+  await trigger.press("Enter");
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  const menuId = await trigger.getAttribute("aria-controls");
+  expect(menuId).toBeTruthy();
+  // Radix retains closed menus during their exit animation. Read only the
+  // menu controlled by this trigger, even while another menu is exiting.
+  const menu = page.locator(`[role="menu"][id="${menuId}"]`);
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
 async function menuValues(page: Page, trigger: Locator) {
-  await trigger.click();
-  const rows = await page.getByRole("menuitemradio").allTextContents();
+  const menu = await openMenu(page, trigger);
+  const rows = await menu.getByRole("menuitemradio").allTextContents();
   await page.keyboard.press("Escape");
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(menu).toBeHidden();
   return rows;
 }
 
 async function pick(page: Page, trigger: Locator, name: string) {
-  await trigger.press("Enter");
-  const option = page.getByRole("menuitemradio", { name, exact: true });
+  const menu = await openMenu(page, trigger);
+  const option = menu.getByRole("menuitemradio", { name, exact: true });
   await expect(option).toBeVisible();
   // Keyboard selection avoids racing the menu's open animation.
   await option.press("Enter");
   await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(menu).toBeHidden();
 }
 
 const DISCOVERY_FAILED = "Could not load live models for this provider.";

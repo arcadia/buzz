@@ -444,33 +444,87 @@ test.describe("list virtualization", () => {
       // That reader intent retires Virtua's active prepend reconciliation, so
       // later row measurements must not pull the viewport back toward the
       // completed prepend before the next upward load.
-      const exitTracePromise = timeline.evaluate(async (scroller) => {
-        const s = scroller as HTMLElement;
-        const startScrollTop = s.scrollTop;
-        let previousScrollTop = startScrollTop;
-        let maxForwardTravel = 0;
-        let maxRollback = 0;
-        const deadline = performance.now() + 400;
-        while (performance.now() < deadline) {
-          const travel = s.scrollTop - startScrollTop;
-          maxForwardTravel = Math.max(maxForwardTravel, travel);
-          maxRollback = Math.max(maxRollback, previousScrollTop - s.scrollTop);
-          previousScrollTop = s.scrollTop;
-          await new Promise((resolve) => requestAnimationFrame(resolve));
-        }
-        return { maxForwardTravel, maxRollback };
-      });
       const exitBox = await timeline.boundingBox();
       if (!exitBox) throw new Error("timeline has no bounding box");
       await page.mouse.move(
         exitBox.x + exitBox.width / 2,
         exitBox.y + exitBox.height / 2,
       );
-      for (const deltaY of [120, 100, 80]) {
-        await page.mouse.wheel(0, deltaY);
-        await page.waitForTimeout(12);
+      // Arm after pointer positioning and keep sampling through every delivered
+      // wheel and its scrollend. A fixed recording window can expire between
+      // CDP wheel calls on a busy runner, before the burst has actually finished.
+      const exitRecorder = await timeline.evaluateHandle((scroller) => {
+        const startScrollTop = scroller.scrollTop;
+        let previousScrollTop = startScrollTop;
+        let animationFrame = 0;
+        const state = {
+          maxForwardTravel: 0,
+          maxRollback: 0,
+          wheelEvents: 0,
+          scrollEnded: false,
+          stableFrames: 0,
+          cleanup: () => {
+            cancelAnimationFrame(animationFrame);
+            scroller.removeEventListener("wheel", onWheel);
+            scroller.removeEventListener("scrollend", onScrollEnd);
+          },
+        };
+        const onWheel = () => {
+          state.wheelEvents += 1;
+          state.scrollEnded = false;
+          state.stableFrames = 0;
+        };
+        const onScrollEnd = () => {
+          state.scrollEnded = true;
+        };
+        const sample = () => {
+          const scrollTop = scroller.scrollTop;
+          state.maxForwardTravel = Math.max(
+            state.maxForwardTravel,
+            scrollTop - startScrollTop,
+          );
+          state.maxRollback = Math.max(
+            state.maxRollback,
+            previousScrollTop - scrollTop,
+          );
+          state.stableFrames =
+            scrollTop === previousScrollTop ? state.stableFrames + 1 : 0;
+          previousScrollTop = scrollTop;
+          animationFrame = requestAnimationFrame(sample);
+        };
+        scroller.addEventListener("wheel", onWheel, { passive: true });
+        scroller.addEventListener("scrollend", onScrollEnd);
+        animationFrame = requestAnimationFrame(sample);
+        return state;
+      });
+      let exitTrace: { maxForwardTravel: number; maxRollback: number };
+      try {
+        for (const deltaY of [120, 100, 80]) {
+          await page.mouse.wheel(0, deltaY);
+        }
+        exitTrace = await exitRecorder.evaluate(async (state) => {
+          const deadline = performance.now() + 5_000;
+          while (
+            state.wheelEvents < 3 ||
+            !state.scrollEnded ||
+            state.stableFrames < 2
+          ) {
+            if (performance.now() >= deadline) {
+              throw new Error(
+                `exit wheel burst did not settle (${state.wheelEvents}/3 events)`,
+              );
+            }
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+          }
+          return {
+            maxForwardTravel: state.maxForwardTravel,
+            maxRollback: state.maxRollback,
+          };
+        });
+      } finally {
+        await exitRecorder.evaluate((state) => state.cleanup());
+        await exitRecorder.dispose();
       }
-      const exitTrace = await exitTracePromise;
       expect(exitTrace.maxForwardTravel).toBeGreaterThan(200);
       expect(exitTrace.maxRollback).toBeLessThan(5);
 
