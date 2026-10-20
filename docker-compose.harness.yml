@@ -6,6 +6,9 @@
 # collide across projects) and alternate host ports. Mirrors Eva's evaperf-*
 # isolation pattern.
 #
+# Credentials in this file are public test fixtures, not deployment secrets.
+# Keep all published backing-service ports on loopback.
+#
 #   Bring up:  docker compose -p buzz-harness -f docker-compose.harness.yml up -d
 #   Ports:     postgres 5471 · redis 6471 · minio 9471/9472
 #   Relay (run separately by scripts/start-isolated-test-relay.sh):
@@ -20,7 +23,7 @@ services:
       POSTGRES_DB: buzz
       PGDATA: /var/lib/postgresql/data
     ports:
-      - "5471:5432"
+      - "127.0.0.1:5471:5432"
     volumes:
       - harness-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -33,7 +36,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6471:6379"
+      - "127.0.0.1:6471:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -49,8 +52,8 @@ services:
       MINIO_ROOT_USER: buzz_dev
       MINIO_ROOT_PASSWORD: buzz_dev_secret
     ports:
-      - "9471:9000"
-      - "9472:9001"
+      - "127.0.0.1:9471:9000"
+      - "127.0.0.1:9472:9001"
     volumes:
       - harness-minio-data:/data
     healthcheck:
