@@ -116,7 +116,7 @@ BUZZ_COMMUNITY_HOST="${COMMUNITY_HOST}" \
 ok "Community + channels + members seeded"
 
 # ── Build relay from source (current branch) ─────────────────────────────────
-# The repo pins Rust via rust-toolchain.toml (1.95.0). Outside the hermit env a
+# The repo pins Rust via rust-toolchain.toml (1.97.0). Outside the hermit env a
 # stray Homebrew `cargo` (1.89) shadows the pin and fails on sqlx's MSRV, so
 # prefer the rustup shim, which honors the pin.
 if [[ -x "${HOME}/.cargo/bin/cargo" ]]; then

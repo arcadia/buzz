@@ -176,6 +176,7 @@ function ForumComposerVisit({
   const draftLifecycle = useDraftPersistLifecycle({
     effectiveDraftKey: draftKey,
     channelId,
+    editorReady: richText.editor !== null,
     loadDraft: drafts.loadDraft,
     persistDraft: drafts.persistDraft,
     getMentionRefs: mentions.getDraftMentionRefs,

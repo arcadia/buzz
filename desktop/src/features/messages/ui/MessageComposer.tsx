@@ -191,34 +191,6 @@ function MessageComposerImpl({
     media.queuedAttachmentsRef.current.length === 0;
   const ownsDropZone = mediaController === undefined;
   const backgroundUpload = useBackgroundMediaUpload();
-  const { trackAuthoredContent, getComposerRevision, runComposerUpdate } =
-    useDraftPersistLifecycle({
-      effectiveDraftKey,
-      channelId,
-      loadDraft: drafts.loadDraft,
-      persistDraft: drafts.persistDraft,
-      getMentionRefs: mentions.getDraftMentionRefs,
-      restoreMentionRefs: mentions.restoreDraftMentionRefs,
-      livePendingImeta: media.pendingImeta,
-      setPendingImeta: media.setPendingImeta,
-      getQueuedAttachments: () => media.queuedAttachmentsRef.current,
-      saveQueuedAttachmentsForDraft,
-      clearQueuedAttachments: media.clearQueuedAttachments,
-      restoreQueuedAttachments: media.restoreQueuedAttachments,
-      takeQueuedAttachmentsForDraft,
-      setContent: (content) => {
-        setComposerContent(content);
-        richText.setContent(content);
-      },
-      clearContent: () => {
-        setComposerContent("");
-        richText.clearContent();
-      },
-      setSpoileredAttachmentUrls,
-      spoileredAttachmentUrlsRef,
-      syncComposerContentFromEditor,
-      getImplicitAgentMentionPrefix: implicitAgentMentionProvenance.getPrefix,
-    });
   // biome-ignore lint/correctness/useExhaustiveDependencies: effectiveDraftKey is the sole trigger
   React.useEffect(() => {
     media.setUploadState({ status: "idle" });
@@ -313,6 +285,36 @@ function MessageComposerImpl({
       }
     },
   });
+  const editorReady = richText.editor !== null;
+  const { trackAuthoredContent, getComposerRevision, runComposerUpdate } =
+    useDraftPersistLifecycle({
+      effectiveDraftKey,
+      channelId,
+      editorReady,
+      loadDraft: drafts.loadDraft,
+      persistDraft: drafts.persistDraft,
+      getMentionRefs: mentions.getDraftMentionRefs,
+      restoreMentionRefs: mentions.restoreDraftMentionRefs,
+      livePendingImeta: media.pendingImeta,
+      setPendingImeta: media.setPendingImeta,
+      getQueuedAttachments: () => media.queuedAttachmentsRef.current,
+      saveQueuedAttachmentsForDraft,
+      clearQueuedAttachments: media.clearQueuedAttachments,
+      restoreQueuedAttachments: media.restoreQueuedAttachments,
+      takeQueuedAttachmentsForDraft,
+      setContent: (content) => {
+        setComposerContent(content);
+        richText.setContent(content);
+      },
+      clearContent: () => {
+        setComposerContent("");
+        richText.clearContent();
+      },
+      setSpoileredAttachmentUrls,
+      spoileredAttachmentUrlsRef,
+      syncComposerContentFromEditor,
+      getImplicitAgentMentionPrefix: implicitAgentMentionProvenance.getPrefix,
+    });
   const linkEditor = useLinkEditor(richText);
   syncContentRefFromEditorRef.current = () => {
     const markdown = richText.getMarkdown();
@@ -386,8 +388,9 @@ function MessageComposerImpl({
     onDeferredEditPendingChange?.(isDeferredEditPending);
     return () => onDeferredEditPendingChange?.(false);
   }, [isDeferredEditPending, onDeferredEditPendingChange]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: editTarget?.id is the trigger
+  // biome-ignore lint/correctness/useExhaustiveDependencies: restore on target changes once the editor is ready
   React.useEffect(() => {
+    if (!editorReady) return;
     if (editTarget && media.isUploading) return onCancelEdit?.();
     if (editTarget) {
       preEditSnapshotRef.current = {
@@ -428,7 +431,7 @@ function MessageComposerImpl({
       media.restoreQueuedAttachments(restoredQueuedAttachments);
       setSpoileredAttachmentUrls(restoredSpoileredAttachmentUrls);
     }
-  }, [editTarget?.id]);
+  }, [editTarget?.id, editorReady]);
   React.useEffect(() => {
     if (!replyTarget || composerDisabled) return;
     richText.focusPreserve();
@@ -480,9 +483,10 @@ function MessageComposerImpl({
   addressedMentionRestore.restoreAddressedAgentMentionsRef.current =
     restoreAddressedAgentMentions;
   React.useLayoutEffect(() => {
-    if (!audienceScope || editTarget != null) return;
+    // Provenance must describe text inserted into the restored live editor.
+    if (!editorReady || !audienceScope || editTarget != null) return;
     restoreAddressedAgentMentions();
-  }, [audienceScope, editTarget, restoreAddressedAgentMentions]);
+  }, [audienceScope, editTarget, editorReady, restoreAddressedAgentMentions]);
   syncAddressedAgentsFromTextRef.current = syncAddressedAgentsFromText;
   const applyChannelInsert = React.useCallback(
     (suggestion: ChannelSuggestion) => {
@@ -696,9 +700,10 @@ function MessageComposerImpl({
   // Draft auto-submit runs once after persisted editor state loads.
   const onAutoSubmitCompleteRef = React.useRef(onAutoSubmitComplete);
   onAutoSubmitCompleteRef.current = onAutoSubmitComplete;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally fires once on mount only
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once when the mounted editor is ready
   React.useEffect(() => {
     if (
+      !editorReady ||
       autoSubmitDraftKey === null ||
       autoSubmitDraftKey !== effectiveDraftKey
     ) {
@@ -711,7 +716,7 @@ function MessageComposerImpl({
       submit: () => submitMessageRef.current(),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // mount-only
+  }, [editorReady]);
   const handleSubmit = React.useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();

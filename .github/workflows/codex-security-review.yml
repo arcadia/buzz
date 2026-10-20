@@ -232,7 +232,7 @@ jobs:
       - name: Checkout exact pull request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/pull/${{ needs.prepare-review.outputs.pr_number }}/head
+          ref: ${{ needs.prepare-review.outputs.head_sha }}
           path: ${{ env.REVIEW_REPOSITORY }}
           fetch-depth: 0
           persist-credentials: false

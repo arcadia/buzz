@@ -597,9 +597,9 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "eventsource-client"
-version = "0.17.5"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96df8cfa11d3c8e4e1a48b81c9c600ecbe8c11d1326f41e1524cc4d42f7bf6d9"
+checksum = "a4a8e552605d54307fc2c066c65f604bef5eab45435d3578f5e5179b674f2e18"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -1316,9 +1316,9 @@ dependencies = [
 
 [[package]]
 name = "launchdarkly-server-sdk"
-version = "3.2.0"
+version = "3.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22259877ec581fa56a9f0b982e583e16fa01b71ba6d3f786ef5ccfc6ca6f92ff"
+checksum = "831983987c39eb960757d15d359b4e6633066a3c84637baf8ca7c3359d04360c"
 dependencies = [
  "aws-lc-rs",
  "bitflags 2.13.2",
@@ -1336,6 +1336,7 @@ dependencies = [
  "lru",
  "moka",
  "parking_lot",
+ "percent-encoding",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -1400,9 +1401,9 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "lru"
-version = "0.16.4"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
+checksum = "5d2f2f9b4ba7e6b24d95e7e899329d35be83bcded72c8540cdd5368932d1d90a"
 
 [[package]]
 name = "maplit"

@@ -31,7 +31,11 @@ use serde_json::Value;
 use sha2::Digest;
 use tokio::sync::{watch, Mutex};
 
-use crate::{auth_http::read_oauth_json, databricks::StrictWorkspace, types::AgentError};
+use crate::{
+    auth_http::{oauth_redirect_policy, read_oauth_json, validate_oauth_endpoint},
+    databricks::StrictWorkspace,
+    types::AgentError,
+};
 
 /// Buffer before `expires_at` to consider a cached token "still good".
 /// Keeps us off the cliff if the clock or the server's clock drifts.
@@ -371,6 +375,7 @@ pub struct PkceOAuthTokenSource {
     cfg: PkceOAuthConfig,
     http: Client,
     workspace: Option<StrictWorkspace>,
+    allow_loopback_http: bool,
     cache_path: PathBuf,
     /// Injected browser launcher, called inside [`browser_pkce_flow`] while the
     /// localhost listener is live. Production uses [`DefaultBrowserOpener`];
@@ -414,8 +419,19 @@ impl PkceOAuthTokenSource {
         opener: Arc<dyn BrowserOpener>,
         http_timeout: Duration,
     ) -> Result<Arc<Self>, AgentError> {
-        let http = Client::builder()
-            .timeout(http_timeout)
+        let discovery = validate_oauth_endpoint(&cfg.discovery_url, true)?;
+        let allow_loopback_http = discovery.scheme() == "http";
+        let mut builder = Client::builder()
+            .redirect(oauth_redirect_policy(allow_loopback_http))
+            .timeout(http_timeout);
+        if allow_loopback_http {
+            // Keep the local HTTP exception local even with ambient proxy/DNS
+            // configuration. Literal loopback IPs need no DNS override.
+            builder = builder
+                .no_proxy()
+                .resolve("localhost", ([127, 0, 0, 1], 0).into());
+        }
+        let http = builder
             .build()
             .map_err(|_| AgentError::Llm("oauth http client construction failed".into()))?;
         Self::from_parts(cfg, opener, http, None)
@@ -441,6 +457,8 @@ impl PkceOAuthTokenSource {
         http: Client,
         workspace: Option<StrictWorkspace>,
     ) -> Result<Arc<Self>, AgentError> {
+        let allow_loopback_http =
+            validate_oauth_endpoint(&cfg.discovery_url, true)?.scheme() == "http";
         let cache_path = cache_path_for(&cfg)?;
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent)
@@ -451,6 +469,7 @@ impl PkceOAuthTokenSource {
             cfg,
             http,
             workspace,
+            allow_loopback_http,
             cache_path,
             opener,
             state: Mutex::new(initial),
@@ -503,6 +522,8 @@ impl PkceOAuthTokenSource {
             .and_then(Value::as_str)
             .ok_or_else(|| AgentError::Llm("oauth discovery: token_endpoint missing".into()))?
             .to_string();
+        validate_oauth_endpoint(&auth, self.allow_loopback_http)?;
+        validate_oauth_endpoint(&token, self.allow_loopback_http)?;
         if let Some(workspace) = &self.workspace {
             workspace.validate_endpoint(&auth)?;
             workspace.validate_endpoint(&token)?;
@@ -2197,6 +2218,10 @@ async fn browser_pkce_flow(
         .map_err(|_| AuthError::NetworkUnavailable)?;
     token_from_response(&v, None).map_err(|_| AuthError::NetworkUnavailable)
 }
+
+#[cfg(test)]
+#[path = "auth_transport_tests.rs"]
+mod transport_tests;
 
 #[cfg(test)]
 mod tests {

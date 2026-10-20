@@ -21,6 +21,72 @@ fn legacy(server: &Server, root: &Path, opener: Arc<Opener>) -> Arc<PkceOAuthTok
     .unwrap()
 }
 
+#[tokio::test]
+async fn legacy_oauth_redirects_never_replay_grants_over_http() {
+    use crate::auth_http::oauth_redirect_policy;
+
+    let sink = Server::start(false, |_, _| {
+        Reply::Json(200, json!({"access_token":"must-not-be-issued"}))
+    })
+    .await;
+    for status in [307, 308] {
+        let location = format!("{}/token", sink.base);
+        let server = Server::start(true, move |_, request| {
+            assert_eq!(request.form()["refresh_token"], "synthetic-refresh");
+            Reply::Raw(format!(
+                "HTTP/1.1 {status} Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            ))
+        })
+        .await;
+        let result = server
+            .builder()
+            // Even an explicitly local provider may not downgrade after TLS.
+            .redirect(oauth_redirect_policy(true))
+            .build()
+            .unwrap()
+            .post(format!("{}/token", server.base))
+            .form(&[
+                ("refresh_token", "synthetic-refresh"),
+                ("code", "synthetic-code"),
+            ])
+            .send()
+            .await;
+        assert!(result.unwrap_err().is_redirect());
+        assert_eq!(sink.count("/token"), 0, "grant escaped the TLS boundary");
+    }
+}
+
+#[tokio::test]
+async fn legacy_oauth_cross_origin_https_redirects_remain_supported() {
+    use crate::auth_http::oauth_redirect_policy;
+
+    let sink = Server::start(true, |_, request| {
+        assert_eq!(request.form()["refresh_token"], "synthetic-refresh");
+        Reply::Json(200, json!({"access_token":"synthetic-fresh"}))
+    })
+    .await;
+    let location = format!("{}/token", sink.base);
+    let server = Server::start(true, move |_, _| {
+        Reply::Raw(format!(
+            "HTTP/1.1 307 Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ))
+    })
+    .await;
+    let response = server
+        .builder()
+        .add_root_certificate(sink.cert.clone().unwrap())
+        .redirect(oauth_redirect_policy(false))
+        .build()
+        .unwrap()
+        .post(format!("{}/token", server.base))
+        .form(&[("refresh_token", "synthetic-refresh")])
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+    assert_eq!(sink.count("/token"), 1);
+}
+
 #[test]
 fn public_constructor_requires_explicit_https_origin_and_root() {
     let root = tempfile::tempdir().unwrap();

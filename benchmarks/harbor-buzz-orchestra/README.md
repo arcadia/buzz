@@ -8,6 +8,14 @@ Each agent runs *inside* the Harbor task container as the same
 launches: the production MCP toolset (shell, file tools, todo) with the
 `buzz` CLI on the shell's PATH. No Harbor fork or patch is required.
 
+The local benchmark launcher supports macOS and Linux. Its generated identities
+and service credentials are saved in the gitignored `.benchmark/` directory,
+with owner-only directory and file permissions (0700/0600). Compose and the
+provisioner need readable runtime credentials; these files are not encrypted.
+The launcher repairs existing permissions and rejects linked or foreign-owned
+credential files. Native Windows is refused because POSIX mode bits do not
+protect Windows ACLs. WSL requires a filesystem that enforces these permissions.
+
 ## Define the team
 
 The manifest is the benchmark condition. Each roster entry selects an agent

@@ -42,7 +42,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88.0"
+rust-version = "1.97.0"
 license = "Apache-2.0"
 repository = "https://github.com/block/sprout"
 
@@ -125,7 +125,7 @@ zeroize = "1.8"
 dashmap = "6"
 moka    = { version = "0.12", features = ["sync"] }
 arc-swap = "1"
-lru     = "0.16"
+lru     = "0.18.2"
 
 # Async stream utilities
 futures-util = "0.3"
@@ -138,7 +138,7 @@ url = "2"
 proptest = "1"
 
 # MCP SDK (used by buzz-dev-mcp and buzz-agent)
-rmcp = { version = "1.1.0", features = ["server", "transport-io", "macros"] }
+rmcp = { version = "2.1.0", features = ["server", "transport-io", "macros"] }
 schemars = { version = "1", default-features = false }
 
 # Internal crates

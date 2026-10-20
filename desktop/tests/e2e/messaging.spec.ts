@@ -2395,6 +2395,28 @@ test("draft is preserved when switching channels", async ({ page }) => {
   await expect(input).toHaveText(draft);
 });
 
+test("a nonempty draft survives editor remount after visiting Pulse", async ({
+  page,
+}) => {
+  const draft = "Keep this unsent draft through Pulse navigation";
+  await page.goto("/");
+  await page.getByTestId("channel-general").click();
+  await expect(page.getByTestId("chat-title")).toHaveText("general");
+  await page.getByTestId("message-input").fill(draft);
+
+  await page.getByTestId("open-pulse-view").click();
+  await expect(page.locator(".pulse-composer")).toBeVisible();
+  await page.getByTestId("channel-general").click();
+  await expect(page.getByTestId("chat-title")).toHaveText("general");
+  await expect(page.getByTestId("message-input")).toHaveText(draft);
+
+  await page.reload();
+  await expect(page.getByTestId("message-input")).toHaveText(draft);
+  await page.getByTestId("send-message").click();
+  await expect(page.getByTestId("message-timeline")).toContainText(draft);
+  await expect(page.getByTestId("message-input")).toHaveText("");
+});
+
 test("sending a message clears the draft", async ({ page }) => {
   const message = `Sent message ${Date.now()}`;
   const input = page.getByTestId("message-input");

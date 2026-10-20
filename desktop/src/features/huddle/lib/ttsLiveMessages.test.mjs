@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import {
@@ -138,6 +139,43 @@ test("strips attachment markup and skips attachment-only events", () => {
     speakableText({ ...base, content: `||\n![image](${url})\n||`, tags }),
     null,
   );
+  for (const content of ["||\nkeep me\n||", "||\n\nunfinished"]) {
+    assert.equal(speakableText({ ...base, content, tags }), content);
+  }
+  assert.equal(
+    speakableText({
+      ...base,
+      content: `before\n || \n\n![image](${url})\n \t\n || \nafter`,
+      tags,
+    }),
+    "before\nafter",
+  );
+});
+
+test("attachment cleanup remains bounded for an unclosed spoiler with many blank lines", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `
+        import assert from "node:assert/strict";
+        import { classifySpeakableAgentText } from ${JSON.stringify(new URL("./ttsLiveMessages.ts", import.meta.url).href)};
+        const content = "||\\n" + "\\n".repeat(50_000) + "unfinished";
+        const event = {
+          id: "1", kind: 9, pubkey: "agent", content,
+          tags: [["h", "channel"], ["imeta", "url https://cdn.example/image.png"]],
+        };
+        assert.equal(
+          classifySpeakableAgentText(event, new Set(["agent"]), null, "channel").text,
+          content,
+        );
+      `,
+    ],
+    { encoding: "utf8", timeout: 5_000 },
+  );
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test("queues agent messages in live thread arrival order", async () => {

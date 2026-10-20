@@ -877,15 +877,14 @@ desktop `link_preview` (SSRF check).
 
 JWKS uses `public_https` by default and applies this public-address check to
 every resolved answer before pinning the first permitted address. Explicit
-`mesh` mode accepts HTTP only for a DNS hostname (not an IP literal) without
+`mesh` mode requires HTTPS with a DNS hostname (not an IP literal) without
 userinfo, query, fragment, or backslash. It checks every DNS answer against the
 positive address allow-list in the
 [NIP-FI JWKS snapshot contract](docs/nips/NIP-FI.md#jwks-snapshot), rejects
-empty or mixed answers, and pins the first checked address. Mesh selection is
-an operator assertion, not a transport property the Rust relay verifies.
-Operators must enforce mutual TLS peer authentication and integrity
-protection, authorize the JWKS endpoint, and restrict egress. Unauthenticated
-HTTP permits key substitution and issuer impersonation.
+empty or mixed answers, and pins the first checked address. Both modes verify
+TLS certificate chains and hostnames against trusted roots, disable proxies,
+and deny redirects. Operators must authorize the JWKS endpoint and restrict
+egress. Cleartext HTTP configurations are rejected before network I/O.
 
 ### Audit Integrity
 

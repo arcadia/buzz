@@ -150,7 +150,7 @@ fn enforce_jwks_contract_mismatch_rejects() {
 fn enforce_policy_and_jwks_source_contract_mismatch_rejects() {
     let issuer = "https://id.example";
     let mesh_contract = JwksSourceContract::new_mesh(
-        "http://mesh.example.test/.well-known/jwks.json".to_owned(),
+        "https://mesh.example.test/.well-known/jwks.json".to_owned(),
         300,
         3600,
     )

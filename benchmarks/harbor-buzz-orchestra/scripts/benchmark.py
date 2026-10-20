@@ -41,6 +41,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from harbor_buzz_testbed.private_state import read_private, write_private
+
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = PACKAGE_ROOT.parents[1]
 STATE_DIR = PACKAGE_ROOT / ".benchmark"
@@ -75,7 +77,7 @@ AGENT_BINARIES = ("buzz-acp", "buzz-agent", "buzz-dev-mcp")
 FORWARDER_SOURCE = PACKAGE_ROOT / "forwarder" / "relay_forwarder.rs"
 FORWARDER_BINARY = "relay-forwarder"
 LINUX_TARGET_DIR = STATE_DIR / "linux-target"
-RUST_IMAGE = "rust:1.95-alpine"
+RUST_IMAGE = "rust:1.97-alpine"
 
 
 @dataclass(frozen=True)
@@ -342,10 +344,10 @@ def load_state() -> dict[str, str]:
     """Generate-or-load the benchmark environment's keys and secrets."""
     from harbor_buzz_testbed.keys import generate_keypair, keypair_from_secret
 
-    STATE_DIR.mkdir(mode=0o700, exist_ok=True)
     state_path = STATE_DIR / "state.json"
-    if state_path.is_file():
-        state = json.loads(state_path.read_text())
+    stored = read_private(state_path)
+    if stored is not None:
+        state = json.loads(stored)
     else:
         owner = generate_keypair()
         user = generate_keypair()
@@ -359,8 +361,7 @@ def load_state() -> dict[str, str]:
             "git_hook_hmac_secret": secrets.token_hex(32),
             "relay_private_key": generate_keypair().secret_key,
         }
-        state_path.touch(mode=0o600)
-        state_path.write_text(json.dumps(state, indent=2))
+        write_private(state_path, json.dumps(state, indent=2))
     state["owner_pubkey"] = keypair_from_secret(state["owner_secret_key"]).pubkey
     state["user_pubkey"] = keypair_from_secret(state["user_secret_key"]).pubkey
     return state
@@ -409,8 +410,7 @@ def write_env_file(state: dict[str, str]) -> Path:
         "BUZZ_PG_HOST_PORT": str(PG_HOST_PORT),
         "BUZZ_METRICS_HOST_PORT": str(METRICS_HOST_PORT),
     }
-    env_path.touch(mode=0o600)
-    env_path.write_text("".join(f"{k}={v}\n" for k, v in lines.items()))
+    write_private(env_path, "".join(f"{k}={v}\n" for k, v in lines.items()))
     return env_path
 
 
@@ -448,8 +448,7 @@ def write_provisioner_config(state: dict[str, str], endpoint_config: Path) -> Pa
         "archive_on_teardown": False,
     }
     path = STATE_DIR / "provisioner.json"
-    path.touch(mode=0o600)
-    path.write_text(json.dumps(config, indent=2))
+    write_private(path, json.dumps(config, indent=2))
     return path
 
 
