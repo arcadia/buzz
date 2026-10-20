@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		BBAA00000000000000000011 /* IdentityFilePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBAA00000000000000000012 /* IdentityFilePlugin.swift */; };
+		4E1C0A012F60000100A17E01 /* NativeLicensesPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E1C0A022F60000100A17E01 /* NativeLicensesPlugin.swift */; };
 		BBAA00000000000000000001 /* HostedHpkeBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBAA00000000000000000002 /* HostedHpkeBackup.swift */; };
 		DAAB00000000000000000001 /* NativeTabler.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAAB00000000000000000002; };
 		4A71C0192F40D00100A17E02 /* MeAvatarLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A71C01A2F40D00100A17E02 /* MeAvatarLoader.swift */; };
@@ -99,6 +100,7 @@
 
 /* Begin PBXFileReference section */
 		BBAA00000000000000000012 /* IdentityFilePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityFilePlugin.swift; sourceTree = "<group>"; };
+		4E1C0A022F60000100A17E01 /* NativeLicensesPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeLicensesPlugin.swift; sourceTree = "<group>"; };
 		BBAA00000000000000000002 /* HostedHpkeBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostedHpkeBackup.swift; sourceTree = "<group>"; };
 		DAAB00000000000000000002 /* NativeTabler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTabler.swift; sourceTree = "<group>"; };
 		4A71C01A2F40D00100A17E02 /* MeAvatarLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeAvatarLoader.swift; sourceTree = "<group>"; };
@@ -283,6 +285,7 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				BBAA00000000000000000002 /* HostedHpkeBackup.swift */,
 				BBAA00000000000000000012 /* IdentityFilePlugin.swift */,
+				4E1C0A022F60000100A17E01 /* NativeLicensesPlugin.swift */,
 				BZZ00000000000000000024 /* PushNativeState.swift */,
 				BZZ00000000000000000027 /* PushEndpointGrantStore.swift */,
 				BZZ0000000000000000002A /* PushSnapshotBridge.swift */,
@@ -374,6 +377,7 @@
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				E0B5862D106D142B580309AF /* [CP] Embed Pods Frameworks */,
 				ED5DDC1D42A9D342928222CC /* [CP] Copy Pods Resources */,
+				4E1C0A032F60000100A17E01 /* Package Native Notices */,
 			);
 			buildRules = (
 			);
@@ -544,6 +548,31 @@
 			shellPath = /bin/sh;
 			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
 		};
+		4E1C0A032F60000100A17E01 /* Package Native Notices */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${SRCROOT}/../../scripts/native-mobile-notices.py",
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-acknowledgements.plist",
+				"${FLUTTER_ROOT}/LICENSE",
+			);
+			name = "Package Native Notices";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/native-licenses.json",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n/usr/bin/env python3 \"${SRCROOT}/../../scripts/native-mobile-notices.py\" ios \\\n  --lock \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \\\n  --manifest \"${PODS_ROOT}/Manifest.lock\" \\\n  --acknowledgements \"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-acknowledgements.plist\" \\\n  --flutter-license \"${FLUTTER_ROOT}/LICENSE\" \\\n  --output \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
 		9740EEB61CF901F6004384FC /* Run Script */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -625,6 +654,7 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				BBAA00000000000000000001 /* HostedHpkeBackup.swift in Sources */,
 				BBAA00000000000000000011 /* IdentityFilePlugin.swift in Sources */,
+				4E1C0A012F60000100A17E01 /* NativeLicensesPlugin.swift in Sources */,
 				BZZ00000000000000000023 /* PushNativeState.swift in Sources */,
 				BZZ00000000000000000026 /* PushEndpointGrantStore.swift in Sources */,
 				BZZ00000000000000000029 /* PushSnapshotBridge.swift in Sources */,

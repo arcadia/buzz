@@ -135,6 +135,10 @@ jobs:
         run: scripts/test-desktop-instance-detection.sh
       - name: Mobile worktree identity contract
         run: scripts/test-mobile-worktree-overrides.sh
+      - name: Distribution notices contract
+        run: |
+          python3 scripts/check-distribution-notices.py
+          python3 scripts/test-native-mobile-notices.py
       - name: Codex security review contract
         run: just security-review-check
       - name: Rust cache contract

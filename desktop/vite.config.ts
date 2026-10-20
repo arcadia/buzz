@@ -2,16 +2,23 @@ import path from "node:path";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import { verifyDistributionNotices } from "./scripts/distribution-notices.mjs";
 
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(async ({ mode }) => {
+export default defineConfig(async ({ mode, command }) => {
+  if (command === "build") verifyDistributionNotices();
   const modeEnv = loadEnv(mode, __dirname, "");
   const protectedFeaturesEnabled =
     (process.env.VITE_BUZZ_BESTIE ?? modeEnv.VITE_BUZZ_BESTIE) === "1";
 
   return {
+    // Vite gathers full notices from the dependencies in the emitted graph.
+    // Keep the result inside frontendDist so Tauri embeds it on every platform.
+    build: {
+      license: { fileName: "licenses/frontend-dependencies.txt" },
+    },
     plugins: [
       tanstackRouter({
         target: "react",

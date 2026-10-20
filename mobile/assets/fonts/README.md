@@ -1,5 +1,13 @@
 # Inter heart and warning fallback
 
+The bundled Geist Mono fonts carry the 2024 Geist Project Authors copyright.
+Their full OFL 1.1 text is in `GeistMono-LICENSE.txt`, copied unchanged from
+https://github.com/vercel/geist-font/blob/e1f671c727f6de7e97c1e1d26dbb44f349c19459/OFL.txt.
+Tabler's MIT text is in `TablerIcons-LICENSE.txt`. These font notices and the
+emoji-mart data license are included in `mobile/NOTICES`, which Flutter embeds
+in its license bundle and displays under Settings → Open source licenses.
+Regenerate it with `python scripts/generate-distribution-notices.py --mobile-only`.
+
 The two Inter 4.001 variable fonts are derived from the previously bundled
 fonts by removing only U+2764 and U+26A0 from their Unicode character maps.
 Flutter can then choose a native font for heart and warning characters,
