@@ -25,8 +25,8 @@ These use real Helm renders of both dummy environment files
 (`charts/buzz-arcadia/ci/*-values.example.yaml`) and reject zero identity/image
 placeholders, missing rollout metadata, incorrect registry/host wiring, and
 unsupported bundled services; the last drives `provision-secrets.sh` against
-stub `aws`/`buzz-admin` binaries, so it needs bash and openssl but no AWS
-access. They require Helm 3.14 and Python 3.12 with PyYAML 6.0.3. Test identities and image tags are synthetic and must not be used
+stub `aws`/`buzz-admin` binaries (including the Git Bash path conversion and the
+owner key file), so it needs bash and openssl but no AWS access. They require Helm 3.14 and Python 3.12 with PyYAML 6.0.3. Test identities and image tags are synthetic and must not be used
 in an Application.
 
 ## Environment records are private
@@ -53,7 +53,11 @@ accounts named by each cluster's private `global-helm-values-patch.yaml`:
 - prd-ai: `buzz/relay` and its corresponding OIDC role.
   Scope each role to its own account/repositories and deny repository creation.
 - The reviewed relay SSM values and operator key custody described in
-  [PREFLIGHT.md](charts/buzz-arcadia/PREFLIGHT.md). Verify the current bridge
+  [PREFLIGHT.md](charts/buzz-arcadia/PREFLIGHT.md). On Windows run
+  `provision-secrets.sh` from Git Bash. `--apply` never prints the owner secret
+  key: it writes it to a `0600` file outside the checkout (`--owner-key-file`,
+  default `~/.config/buzz-provision/owner-key-<cluster>.hex`) and prints that
+  path and the public key to paste into the enabling PR. Verify the current bridge
   ExternalSecret inventory separately in `aria-frontend`; the restored bridge
   runbook is not proof that its consumer contract has stayed unchanged.
 - Existing cluster prerequisites: Crossplane RDS composition/provider,

@@ -117,10 +117,13 @@ deploy/scripts/provision-secrets.sh --verify dev-ai --env-dir <cci>/preprd/dev-a
 
 `--apply` never overwrites an existing parameter (`--no-overwrite`), so re-running
 it after a partial failure is safe and cannot silently replace a live relay
-identity. It prints a public key, or the owner secret, only for a parameter it
-created in that run, and any AWS error other than "already exists" stops it. Private keys are written to a `chmod 600` temp file and passed as
-`--value file://…` — never on the command line, because GitHub/AWS log redaction
-covers logs, not `ps auxww`.
+identity. It prints a public key only for a parameter it created in that run, never
+prints a private key, and any AWS error other than "already exists" stops it.
+Values are written to a `chmod 600` temp file and passed as `--value file://…` —
+never on the command line, because GitHub/AWS log redaction covers logs, not
+`ps auxww`. On Windows run it from Git Bash: a native `aws.exe` cannot open the
+`/tmp/…` path `mktemp` returns, so the script converts it with `cygpath -m`
+(`file://C:/…`); on Linux and macOS the path is used as is.
 
 `buzz-admin` is the **only** supported key generator (`crates/buzz-admin`) — there
 is no `keygen` subcommand and hand-rolled secp256k1 material risks a key the
@@ -148,9 +151,26 @@ not recognise. Back it up when it is created:
 Also back up, per upstream's operator README: the Postgres database (the events
 are the product), `git-hook-hmac`, `redis-password`, and the owner public key.
 
-**Owner key.** `provision-secrets.sh --apply` prints the owner **secret** key once
-and stores only the **public** half in SSM. Put the secret in the team password
-manager before closing the terminal. It signs NIP-98 requests to
+**Owner key.** `provision-secrets.sh --apply` stores only the **public** half in
+SSM and never prints the owner **secret** key, because terminal scrollback and
+change-control recordings outlive the session. It writes the secret to a file
+(mode `0600`, in a directory it creates as `0700`) and prints only that file's
+path and the public key, which is the value for `buzz.ownerPubkey` in the
+enabling PR. The default is `~/.config/buzz-provision/owner-key-<cluster>.hex`;
+choose another with `--owner-key-file <path>` or `BUZZ_OWNER_KEY_FILE`. Do not
+point it at `~/.buzz`: that is the Buzz desktop's agent workspace, which agents read.
+
+- The path must be outside this checkout. The script refuses one inside it, or one
+  it cannot create, before writing anything to SSM.
+- An existing file is never replaced. If the target is already there, the new key
+  goes to `<path>.<first 16 hex of the public key>` and the script says so.
+- The file is written only when this run creates `owner-pubkey`. A re-run finds
+  the parameter, issues no new key and leaves the file alone.
+- On Windows `chmod` cannot restrict an NTFS file. Keep it under your user profile
+  (the default does), not on a shared drive.
+
+Put the file's contents in the team password manager, then delete the file. The
+secret signs NIP-98 requests to
 `POST /api/invites` (minting invite links) and nothing else — because
 `buzz-admin add-member` writes the roster directly to Postgres, losing the owner
 key costs the invite-link flow only. That is the whole reason it stays out of
@@ -200,7 +220,8 @@ not "fix" it by pre-creating a fake connection Secret.
 - [ ] AIFM ticket exists, and its number is in `rds.jiraTicketNumber` in the Application
 - [ ] Egress probes archived: `ARIA_BOT_URL=<aria-bot>/health deploy/scripts/reachability.sh --env dev-ai --output …` (node N0a)
 - [ ] `provision-secrets.sh --apply <cluster> --env-dir <cluster dir>` run in the correct account
-- [ ] Relay identity + owner secret key in the team password manager
+- [ ] Relay identity + owner secret key in the team password manager, and the
+      owner key file `--apply` wrote deleted
 - [ ] Bridge `aria-orchestrator-token` matches the same environment's BFF
       secret and is projected as `ARIA_ORCHESTRATOR_TOKEN` by both consumers
 - [ ] `pilot-allowlist` written, with at least one real pilot pubkey (the bridge
