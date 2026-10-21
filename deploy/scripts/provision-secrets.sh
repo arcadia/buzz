@@ -22,10 +22,12 @@
 #   --plan     print the exact aws ssm put-parameter commands, generating no
 #              key material and writing nothing. Default when no mode is given.
 #   --apply    generate key material and write it to SSM. Prints public keys and
-#              parameter names only — a private key is never echoed, never
-#              written to disk, and never passed on a command line (put-parameter
-#              reads it from a file descriptor, not argv, so it stays out of
-#              `ps auxww`).
+#              parameter names only — a private key is never echoed and never
+#              passed on a command line (put-parameter reads it from a 0600
+#              file via file://, not argv, so it stays out of `ps auxww`). The
+#              one secret that is not kept in SSM, the relay OWNER secret key,
+#              is written to a 0600 file outside this checkout; only its path
+#              and the public key are printed.
 #
 # USAGE  (<cci> is a cloud-config-infrastructures checkout of the cluster's branch)
 #   deploy/scripts/provision-secrets.sh --verify dev-ai --env-dir <cci>/preprd/dev-ai
@@ -39,6 +41,10 @@
 #   --scope relay|bridge|all   which tier to act on (default: all)
 #   --agents a,b,c             agent slugs -> buzz/agent-key-<slug>
 #                              (default: aria — the phase-0 generalist)
+#   --owner-key-file <path>    where --apply writes the owner SECRET key
+#                              (default: $BUZZ_OWNER_KEY_FILE, else
+#                              ~/.buzz/owner-key-<cluster>.hex). Must be outside
+#                              this checkout; an existing file is never replaced.
 #   --profile <name>           AWS profile
 #   --region <name>            override the region recorded for the cluster
 #
@@ -70,12 +76,27 @@ CLUSTER=""
 ENV_DIR="${BUZZ_ENV_DIR:-}"
 SCOPE=all
 AGENT_SLUGS="${BUZZ_AGENT_SLUGS:-aria}"
+OWNER_KEY_FILE="${BUZZ_OWNER_KEY_FILE:-}"
+OWNER_KEY_STAGE=""
+OWNER_KEY_WRITTEN=""
 AWS_PROFILE_ARG=()
 REGION=""
 
 die()  { printf 'FAIL: %s\n' "$*" >&2; exit 2; }
 warn() { printf 'WARN: %s\n' "$*" >&2; }
 log()  { printf '%s\n' "$*"; }
+
+# aws.exe and Windows python cannot open Git Bash's /tmp or /c/... paths; cygpath -m gives C:/....
+native_path() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
+
+# A raw mktemp path is /tmp/... under Git Bash, which aws.exe reports as a missing file.
+file_uri() { printf 'file://%s' "$(native_path "$1")"; }
+
+# A staged owner secret key must not outlive an aborted run.
+trap '[ -z "$OWNER_KEY_STAGE" ] || rm -f "$OWNER_KEY_STAGE"' EXIT
+trap 'exit 130' INT TERM HUP
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -85,6 +106,7 @@ while [ $# -gt 0 ]; do
     --env-dir) ENV_DIR="${2:?--env-dir needs a cloud-config-infrastructures cluster directory}"; shift 2 ;;
     --scope)   SCOPE="${2:?--scope needs relay|bridge|all}"; shift 2 ;;
     --agents)  AGENT_SLUGS="${2:?--agents needs a comma-separated list}"; shift 2 ;;
+    --owner-key-file) OWNER_KEY_FILE="${2:?--owner-key-file needs a path outside this checkout}"; shift 2 ;;
     --profile) AWS_PROFILE_ARG=(--profile "${2:?--profile needs a value}"); shift 2 ;;
     --region)  REGION="${2:?--region needs a value}"; shift 2 ;;
     -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
@@ -231,16 +253,12 @@ selected_params() {
 # `pilot-allowlist` go missing from this list while the bridge chart consumed
 # them under its defaults: --verify went green, then ESO failed
 # buzz-bridge-secrets all-or-nothing and the bridge never started.
+#
+# Native Windows Python writes CRLF, hence the tr on each parser call below.
 find_parser() {
   if command -v python3 >/dev/null 2>&1; then printf 'python3'; return 0; fi
   if command -v python  >/dev/null 2>&1; then printf 'python';  return 0; fi
   return 1
-}
-
-# Git Bash hands scripts /c/... paths that a native Windows Python cannot open
-# (and that Python writes CRLF, hence the tr on each parser call below).
-native_path() {
-  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
 }
 
 # Locates aria-frontend's bridge chart values. Explicit env var wins; otherwise
@@ -367,10 +385,73 @@ check_chart_drift() {
   fi
 }
 
+# ── the owner secret key ────────────────────────────────────────────────────
+# Never printed (scrollback and change-control recordings outlive the session): --apply
+# writes it to a 0600 file outside this checkout and shows only the path and public key.
+owner_key_file() {
+  if [ -n "$OWNER_KEY_FILE" ]; then printf '%s' "$OWNER_KEY_FILE"; return 0; fi
+  [ -n "${HOME:-}" ] || return 1
+  printf '%s/.buzz/owner-key-%s.hex' "${HOME%/}" "$CLUSTER"
+}
+
+# Absolute, symlink-free $1 even when trailing components do not exist yet.
+resolve_path() {
+  local p="$1" rest=""
+  while [ ! -d "$p" ]; do rest="/$(basename "$p")${rest}"; p="$(dirname "$p")"; done
+  case "$rest" in */..|*/../*) die "'..' is not allowed in a directory that does not exist yet: $1" ;; esac
+  printf '%s%s' "$(cd "$p" && pwd -P)" "$rest"
+}
+
+# Runs before the first SSM write: once owner-pubkey is stored the secret cannot be re-derived.
+prepare_owner_key_file() {
+  local file dir repo
+  file="$(owner_key_file)" \
+    || die "HOME is unset, so there is no default location for the owner SECRET key: pass --owner-key-file <path>"
+  [ ! -d "$file" ] || die "--owner-key-file is a directory: ${file}"
+  dir="$(resolve_path "$(dirname "$file")")"
+  repo="$(cd "$REPO_ROOT" && pwd -P)"
+  # Case-folded because Windows ignores case and `pwd -P` does not fold it.
+  case "$(printf '%s/' "$dir" | tr '[:upper:]' '[:lower:]')" in
+    "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')"/*) die "owner key path ${file} is inside this checkout (${repo}). A secret key must never sit where it can be committed; choose a path outside it." ;;
+  esac
+  (umask 077; mkdir -p "$dir") || die "cannot create ${dir} for the owner SECRET key"
+  [ -w "$dir" ] || die "${dir} is not writable, so the owner SECRET key could not be saved"
+  OWNER_KEY_FILE="${dir}/$(basename "$file")"
+}
+
+# Staged before owner-pubkey is stored, moved into place only if that store created it.
+stage_owner_key() {
+  OWNER_KEY_STAGE="$(mktemp "$(dirname "$OWNER_KEY_FILE")/.owner-key.XXXXXX")"
+  chmod 600 "$OWNER_KEY_STAGE"
+  printf '%s\n' "$1" > "$OWNER_KEY_STAGE"
+}
+
+discard_owner_key() { rm -f "$OWNER_KEY_STAGE"; OWNER_KEY_STAGE=""; }
+
+# $1 is the public key. An existing file is probably an earlier owner's key: never replace it.
+publish_owner_key() {
+  OWNER_KEY_WRITTEN="$OWNER_KEY_FILE"
+  if [ -e "$OWNER_KEY_WRITTEN" ]; then
+    OWNER_KEY_WRITTEN="${OWNER_KEY_FILE}.${1:0:16}"
+    warn "${OWNER_KEY_FILE} already exists and was left untouched."
+  fi
+  mv "$OWNER_KEY_STAGE" "$OWNER_KEY_WRITTEN"
+  OWNER_KEY_STAGE=""
+}
+
 # ── modes ───────────────────────────────────────────────────────────────────
 do_plan() {
+  local val_dir="${TMPDIR:-/tmp}" owner_file=""
   log "# Pre-flight plan for ${CLUSTER} (account ${EXPECT_ACCOUNT}, prefix ${SSM_PREFIX})"
   log "# Nothing below has been run. Review, then use --apply, or paste by hand."
+  log "# The *.val files hold secrets: create them with umask 077 and delete them afterwards."
+  if [ "$SCOPE" = relay ] || [ "$SCOPE" = all ]; then
+    if owner_file="$(owner_key_file)"; then
+      log "# --apply writes the owner SECRET key (never printed) to ${owner_file}"
+    else
+      log "# --apply needs --owner-key-file: HOME is unset, so there is no default location for the owner SECRET key."
+    fi
+  fi
   log ""
   while IFS='|' read -r tail type tier how consumer; do
     [ -n "$tail" ] || continue
@@ -381,12 +462,12 @@ do_plan() {
         log "#   buzz-admin generate-key    # then feed the right half in from a file, never argv"
         ;;
       *"openssl rand"*)
-        log "#   ${how} > /dev/shm/${tail}.val"
+        log "#   ${how} > ${val_dir}/${tail}.val"
         ;;
     esac
     log "aws ssm put-parameter --region ${REGION} \\"
     log "  --name ${SSM_PREFIX}/${tail} \\"
-    log "  --type ${type} --value file:///dev/shm/${tail}.val --no-overwrite"
+    log "  --type ${type} --value $(file_uri "${val_dir}/${tail}.val") --no-overwrite"
     log ""
   done < <(selected_params)
   log "# Then: $0 --verify ${CLUSTER} --env-dir ${ENV_DIR}"
@@ -402,7 +483,7 @@ put_param() {
   chmod 600 "$tmp"
   printf '%s' "$value" > "$tmp"
   if err="$(aws_ssm put-parameter --name "${SSM_PREFIX}/${tail}" --type "$type" \
-       --value "file://${tmp}" --no-overwrite 2>&1 >/dev/null)"; then
+       --value "$(file_uri "$tmp")" --no-overwrite 2>&1 >/dev/null)"; then
     rm -f "$tmp"
     log "  created  ${SSM_PREFIX}/${tail}"
     return 0
@@ -454,6 +535,7 @@ do_apply() {
 
   check_chart_drift
   command -v openssl >/dev/null 2>&1 || die "openssl not on PATH (needed for the HMAC and Redis secrets)"
+  if [ "$SCOPE" = relay ] || [ "$SCOPE" = all ]; then prepare_owner_key_file; fi
   log "Provisioning ${SSM_PREFIX}/* in account ${EXPECT_ACCOUNT} (scope: ${SCOPE})"
   log "Existing parameters are NEVER overwritten."
   log ""
@@ -470,17 +552,21 @@ do_apply() {
     put_param redis-password    SecureString "$(openssl rand -hex 24)" || true
 
     kp="$(generate_keypair)"; owner_pub="${kp%% *}"; owner_sec="${kp##* }"
+    stage_owner_key "$owner_sec"
     if put_param owner-pubkey String "$owner_pub"; then
+      publish_owner_key "$owner_pub"
       log ""
       log "  owner  pubkey -> Application buzz.ownerPubkey: ${owner_pub}"
       log ""
-      log "  ACTION REQUIRED — the owner SECRET key is printed once, now, and is"
-      log "  not stored anywhere by this script. Put it in the team password"
-      log "  manager before you close this terminal. It signs NIP-98 invite mints"
-      log "  (POST /api/invites). Losing it costs invite links only; roster"
-      log "  changes stay possible via 'buzz-admin add-member' (break-glass)."
-      log "  owner secret key: ${owner_sec}"
+      log "  ACTION REQUIRED — the owner SECRET key is not printed and is not stored"
+      log "  anywhere else by this script. It was written to this file (mode 0600):"
+      log "    ${OWNER_KEY_WRITTEN}"
+      log "  Put its contents in the team password manager, then delete the file."
+      log "  It signs NIP-98 invite mints (POST /api/invites). Losing it costs"
+      log "  invite links only; roster changes stay possible via"
+      log "  'buzz-admin add-member' (break-glass)."
     else
+      discard_owner_key
       log "    owner keypair already provisioned; no new owner secret was issued."
     fi
     log ""
