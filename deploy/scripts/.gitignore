@@ -1,0 +1,8 @@
+# The live agent roster is environment state, not source. Pubkeys are public,
+# but committing them invites the file to drift from the actual relay roster and
+# to be copied between environments — where identities are deliberately separate.
+# Start from agents.roster.example.
+agents.roster
+
+# Soak output belongs on the change-control ticket, not in git.
+*.csv

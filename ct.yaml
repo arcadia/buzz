@@ -1,5 +1,9 @@
 chart-dirs:
   - deploy/charts
+# buzz-arcadia needs deploy-time inputs (owner key, image tag, ticket) that its
+# render guards require; deploy/scripts/test-arcadia-chart.py validates it instead.
+excluded-charts:
+  - buzz-arcadia
 chart-repos: []
 helm-extra-args: --timeout 600s
 target-branch: main
