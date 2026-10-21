@@ -14717,8 +14717,8 @@ SOFTWARE.
 --------------------------------------------------------------------------------
 License: MIT
 
-async-utility 0.3.1
-Source: https://crates.io/api/v1/crates/async-utility/0.3.1/download
+async-utility 0.3.2
+Source: https://crates.io/api/v1/crates/async-utility/0.3.2/download
 Project: https://github.com/yukibtc/async-utility.git
 
 MIT License
@@ -14873,6 +14873,34 @@ Project: https://github.com/daxpedda/web-time
 MIT License
 
 Copyright (c) 2023 dAxpeDDa
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+--------------------------------------------------------------------------------
+License: MIT
+
+negentropy 0.5.2
+Source: https://crates.io/api/v1/crates/negentropy/0.5.2/download
+Project: https://github.com/rust-nostr/negentropy.git
+
+MIT License
+
+Copyright (c) 2023-2025 Yuki Kishimoto
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -15277,9 +15305,6 @@ Project: https://github.com/Mesh-LLM/mesh-llm
 n0-error-macros 1.0.0
 Source: https://crates.io/api/v1/crates/n0-error-macros/1.0.0/download
 Project: https://github.com/n0-computer/n0-error
-negentropy 0.5.0
-Source: https://crates.io/api/v1/crates/negentropy/0.5.0/download
-Project: https://github.com/rust-nostr/negentropy.git
 neteq 0.8.3
 Source: https://crates.io/api/v1/crates/neteq/0.8.3/download
 Project: https://github.com/security-union/videocall-rs
@@ -16729,11 +16754,11 @@ SOFTWARE.
 --------------------------------------------------------------------------------
 License: MIT
 
-spin 0.10.0
-Source: https://crates.io/api/v1/crates/spin/0.10.0/download
+spin 0.10.1
+Source: https://crates.io/api/v1/crates/spin/0.10.1/download
 Project: https://github.com/mvdnes/spin-rs.git
-spin 0.9.8
-Source: https://crates.io/api/v1/crates/spin/0.9.8/download
+spin 0.9.9
+Source: https://crates.io/api/v1/crates/spin/0.9.9/download
 Project: https://github.com/mvdnes/spin-rs.git
 tracing-core 0.1.36
 Source: https://crates.io/api/v1/crates/tracing-core/0.1.36/download

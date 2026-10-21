@@ -269,10 +269,11 @@ jobs:
   security-domain:
     name: Security Domain
     needs: [changes]
-    if: github.event_name == 'push' || needs.changes.outputs.rust == 'true'
+    if: github.event_name == 'push' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.desktop-rust == 'true'
     uses: ./.github/workflows/_ci-security.yml
     with:
       rust: ${{ needs.changes.outputs.rust == 'true' }}
+      desktop_rust: ${{ needs.changes.outputs.desktop-rust == 'true' }}
 
   rust-lint:
     name: Rust Lint
@@ -444,7 +445,7 @@ jobs:
 
   security:
     name: Security
-    if: always() && (needs.changes.result != 'success' || ((github.event_name == 'push' || needs.changes.outputs.rust == 'true')))
+    if: always() && (needs.changes.result != 'success' || ((github.event_name == 'push' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.desktop-rust == 'true')))
     needs: [changes, security-domain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
