@@ -139,7 +139,7 @@ class ProvisionSecretsTests(unittest.TestCase):
             "TMPDIR": self.tmp.as_posix(),
             "HOME": self.home.as_posix(),
         }
-        self.default_owner_key = self.home / ".buzz" / f"owner-key-{CLUSTER}.hex"
+        self.default_owner_key = self.home / ".config" / "buzz-provision" / f"owner-key-{CLUSTER}.hex"
 
     def run_script(self, *args, **env):
         return subprocess.run(

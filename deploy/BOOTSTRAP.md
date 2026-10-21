@@ -56,8 +56,8 @@ accounts named by each cluster's private `global-helm-values-patch.yaml`:
   [PREFLIGHT.md](charts/buzz-arcadia/PREFLIGHT.md). On Windows run
   `provision-secrets.sh` from Git Bash. `--apply` never prints the owner secret
   key: it writes it to a `0600` file outside the checkout (`--owner-key-file`,
-  default `~/.buzz/owner-key-<cluster>.hex`) and prints that path and the public
-  key to paste into the enabling PR. Verify the current bridge
+  default `~/.config/buzz-provision/owner-key-<cluster>.hex`) and prints that
+  path and the public key to paste into the enabling PR. Verify the current bridge
   ExternalSecret inventory separately in `aria-frontend`; the restored bridge
   runbook is not proof that its consumer contract has stayed unchanged.
 - Existing cluster prerequisites: Crossplane RDS composition/provider,

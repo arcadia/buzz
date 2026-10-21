@@ -156,8 +156,9 @@ SSM and never prints the owner **secret** key, because terminal scrollback and
 change-control recordings outlive the session. It writes the secret to a file
 (mode `0600`, in a directory it creates as `0700`) and prints only that file's
 path and the public key, which is the value for `buzz.ownerPubkey` in the
-enabling PR. The default is `~/.buzz/owner-key-<cluster>.hex`; choose another
-with `--owner-key-file <path>` or `BUZZ_OWNER_KEY_FILE`.
+enabling PR. The default is `~/.config/buzz-provision/owner-key-<cluster>.hex`;
+choose another with `--owner-key-file <path>` or `BUZZ_OWNER_KEY_FILE`. Do not
+point it at `~/.buzz`: that is the Buzz desktop's agent workspace, which agents read.
 
 - The path must be outside this checkout. The script refuses one inside it, or one
   it cannot create, before writing anything to SSM.

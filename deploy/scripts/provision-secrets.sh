@@ -41,10 +41,11 @@
 #   --scope relay|bridge|all   which tier to act on (default: all)
 #   --agents a,b,c             agent slugs -> buzz/agent-key-<slug>
 #                              (default: aria — the phase-0 generalist)
-#   --owner-key-file <path>    where --apply writes the owner SECRET key
-#                              (default: $BUZZ_OWNER_KEY_FILE, else
-#                              ~/.buzz/owner-key-<cluster>.hex). Must be outside
-#                              this checkout; an existing file is never replaced.
+#   --owner-key-file <path>    where --apply writes the owner SECRET key (default:
+#                              $BUZZ_OWNER_KEY_FILE, else
+#                              ~/.config/buzz-provision/owner-key-<cluster>.hex).
+#                              Must be outside this checkout; an existing file is
+#                              never replaced.
 #   --profile <name>           AWS profile
 #   --region <name>            override the region recorded for the cluster
 #
@@ -391,7 +392,7 @@ check_chart_drift() {
 owner_key_file() {
   if [ -n "$OWNER_KEY_FILE" ]; then printf '%s' "$OWNER_KEY_FILE"; return 0; fi
   [ -n "${HOME:-}" ] || return 1
-  printf '%s/.buzz/owner-key-%s.hex' "${HOME%/}" "$CLUSTER"
+  printf '%s/.config/buzz-provision/owner-key-%s.hex' "${HOME%/}" "$CLUSTER"
 }
 
 # Absolute, symlink-free $1 even when trailing components do not exist yet.
