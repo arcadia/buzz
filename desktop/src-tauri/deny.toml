@@ -1,0 +1,41 @@
+# cargo-deny policy for desktop/src-tauri/Cargo.lock. The root deny.toml governs
+# the workspace lock; cargo-deny reads one config per run, so nothing here
+# relaxes it. CI's Security job runs `cargo-deny check advisories bans` from
+# this directory.
+
+[graph]
+# macOS and Linux release builds enable `mesh-llm`.
+all-features = true
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2024-0384", reason = "instant 0.1.13 via nostr 0.44 (buzz-core, buzz-sdk, buzz-ws-client); unmaintained, not vulnerable; leaves with the nostr 0.45 migration" },
+    { id = "RUSTSEC-2020-0168", reason = "mach 0.1.2 and 0.3.2 via user-idle 0.6.0, its latest release (macOS idle detection); unmaintained, not vulnerable" },
+    { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15, a proc macro, via tokenizers 0.22 (buzz-voice) and mesh-llm → iroh → netlink; unmaintained, compile-time only" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error 1.0.4 via glib-macros/gtk3-macros 0.18, the gtk-rs line Tauri 2 uses on Linux; unmaintained, compile-time only" },
+    # tauri-utils 2.10 moved to urlpattern 0.6, which has no unic dependency, so
+    # these five clear with a Tauri upgrade.
+    { id = "RUSTSEC-2025-0075", reason = "unic-char-range 0.9 via urlpattern 0.3 ← tauri-utils 2.9; unmaintained, not vulnerable" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-common 0.9 via urlpattern 0.3 ← tauri-utils 2.9; unmaintained, not vulnerable" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-char-property 0.9 via urlpattern 0.3 ← tauri-utils 2.9; unmaintained, not vulnerable" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version 0.9 via urlpattern 0.3 ← tauri-utils 2.9; unmaintained, not vulnerable" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident 0.9 via urlpattern 0.3 ← tauri-utils 2.9; unmaintained, not vulnerable" },
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml via serde_yaml (buzz-desktop, buzz-agent, buzz-persona); unmaintained, not vulnerable; removal needs a YAML parser migration" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant via zbus 5 (notify-rust 4, Tauri notification/opener/single-instance plugins, mesh-llm keyring 4); unmaintained, not vulnerable; none of them uses zbus 6 yet" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names via zbus 5 (notify-rust 4, Tauri notification/opener/single-instance plugins, mesh-llm keyring 4); unmaintained, not vulnerable; none of them uses zbus 6 yet" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via zbus 5 (notify-rust 4, Tauri notification/opener/single-instance plugins, mesh-llm keyring 4); unmaintained, not vulnerable; none of them uses zbus 6 yet" },
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.38.4 only via buzz-media, a desktop dev-dependency; absent from shipped builds" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.38.4 only via buzz-media, a desktop dev-dependency; absent from shipped builds" },
+    # Safe only while the wrapper ban below holds.
+    { id = "RUSTSEC-2026-0293", reason = "ringbuf 0.3.3 only via exactly pinned neteq 0.8.3 (buzz-audio-client), whose sources never use it; bans.deny forbids other consumers" },
+    # Fixed only in zip >= 9; tauri-plugin-updater 2.x and mesh-llm v0.76.2 require zip 4 and 8.
+    { id = "RUSTSEC-2026-0367", reason = "zip 4.6.1: Windows-only tauri-plugin-updater extracts an update only after its minisign check; zip 8.6.0: mesh-llm copies entries manually, never extracts" },
+    { id = "RUSTSEC-2026-0368", reason = "zip 4.6.1: Windows-only tauri-plugin-updater extracts an update only after its minisign check; zip 8.6.0: mesh-llm copies entries manually, never extracts" },
+    { id = "RUSTSEC-2026-0369", reason = "zip 4.6.1: Windows-only tauri-plugin-updater extracts an update only after its minisign check; zip 8.6.0: mesh-llm copies entries manually, never extracts" },
+]
+
+[bans]
+multiple-versions = "allow"
+deny = [
+    { name = "ringbuf", version = "<0.5.2", wrappers = ["neteq"], reason = "only audited NetEQ may declare this unused vulnerable dependency; all other consumers must use a patched release" },
+]

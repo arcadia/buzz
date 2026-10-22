@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate redistributable notices from locked dependencies and bundled assets.
 
-Install the pinned scanner with `cargo install cargo-about --version 0.9.2 --locked`.
+Install the pinned scanner with
+`cargo install cargo-about --version 0.9.2 --locked --features cli`.
 Run this script from any directory. No network access is needed for --mobile-only.
 """
 

@@ -31,7 +31,7 @@ the desktop-only Kubernetes backend is scanned separately.
 Use Python 3.10+ and the pinned scanner:
 
 ```sh
-cargo install cargo-about --version 0.9.2 --locked
+cargo install cargo-about --version 0.9.2 --locked --features cli
 python scripts/generate-distribution-notices.py
 python scripts/check-distribution-notices.py
 ```

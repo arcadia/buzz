@@ -5,6 +5,9 @@ on:
       rust:
         required: true
         type: boolean
+      desktop_rust:
+        required: true
+        type: boolean
     outputs:
       security_result:
         value: ${{ jobs.results.outputs.security_result }}
@@ -19,14 +22,19 @@ jobs:
     name: Security
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: github.event_name == 'push' || inputs.rust
+    if: github.event_name == 'push' || inputs.rust || inputs.desktop_rust
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
       - name: Dependency policy
+        if: github.event_name == 'push' || inputs.rust
         run: cargo-deny check
+      # The desktop lockfile is separate; cargo-deny reads Cargo.toml and deny.toml from the working directory.
+      - name: Desktop dependency policy
+        working-directory: desktop/src-tauri
+        run: cargo-deny check advisories bans
 
 
   results:
