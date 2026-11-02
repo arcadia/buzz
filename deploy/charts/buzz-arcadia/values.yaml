@@ -160,7 +160,8 @@ rds:
   # A chart uninstall or a Git removal must never delete the database.
   deletionPolicy: Orphan
   dbInstanceClass: db.m6g.large
-  engineVersion: "17.4"
+  # Must be a version RDS still offers (describe-db-engine-versions); 17.4 was withdrawn.
+  engineVersion: "17.11"
   allocatedStorage: 50
   storageType: gp3
   multiAZ: false
