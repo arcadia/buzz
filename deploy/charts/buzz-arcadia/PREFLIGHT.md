@@ -61,7 +61,6 @@ mount agent private keys, and the bridge never mounts the relay identity).
 | `owner-pubkey` | String | relay | `buzz-admin generate-key` (Public key) | ArgoCD Application value `buzz.ownerPubkey` |
 | `agent-key-<slug>` | SecureString | bridge | `buzz-admin generate-key` (Secret key) | one per ARIA agent identity (phase 0: `agent-key-aria`) |
 | `aria-bot-api-token` | SecureString | bridge | aria-bot admin | bridge → aria-bot task API `POST /tasks` |
-| `arcadia-docs-mcp-token` | SecureString | bridge | arcadia-docs MCP admin | bridge → arcadia-docs HTTP MCP server |
 | `aria-orchestrator-token` | SecureString | bridge | BFF owner supplies the existing shared value | bridge → BFF `/api/agent-turns`; must match key `aria-orchestrator-token` in the same environment's BFF Secrets Manager secret (aria-frontend deploy docs) |
 | `aria-db-password` | SecureString | bridge | `openssl rand -hex 24` (`--apply` generates it) | the bridge Postgres **role** password: the bootstrap Job creates the role with it, ESO composes `ARIA_DATABASE_URL` from it (chart `database.passwordKeyName`) |
 | `pilot-allowlist` | SecureString | bridge | a human writes it — `<pubkey-hex>:<aria_user_id>:<persona>[:<environment>]`, comma separated | `BUZZ_PILOT_ALLOWLIST` (chart `pilotAllowlist.fromSecret`) — the phase-0 execution gate |

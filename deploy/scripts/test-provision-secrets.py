@@ -182,8 +182,7 @@ class ProvisionSecretsTests(unittest.TestCase):
         for tail in ("relay-private-key", "git-hook-hmac", "redis-password", "owner-pubkey",
                      "agent-key-aria", "aria-db-password"):
             self.assertTrue(self.stored(tail).exists(), tail)
-        for tail in ("aria-bot-api-token", "arcadia-docs-mcp-token",
-                     "aria-orchestrator-token", "pilot-allowlist"):
+        for tail in ("aria-bot-api-token", "aria-orchestrator-token", "pilot-allowlist"):
             self.stored(tail).write_text("SecureString\nexternally-authored\n", encoding="utf-8")
         verify = self.run_script("--verify", CLUSTER)
         self.assertEqual(verify.returncode, 0, verify.stdout + verify.stderr)

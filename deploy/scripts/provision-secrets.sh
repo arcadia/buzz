@@ -212,7 +212,6 @@ OWNER_PARAMS=(
 )
 BRIDGE_PARAMS=(
   "aria-bot-api-token|SecureString|bridge|aria-bot admin issues it|bridge -> POST <aria-bot API>/tasks (node N13)"
-  "arcadia-docs-mcp-token|SecureString|bridge|arcadia-docs MCP admin issues it|bridge -> arcadia-docs http MCP server"
   "aria-orchestrator-token|SecureString|bridge|BFF owner supplies the existing shared token|Must equal aria-orchestrator-token in the same environment's BFF Secrets Manager secret (aria-frontend deploy docs); bridge -> BFF /api/agent-turns."
   "aria-db-password|SecureString|bridge|openssl rand -hex 24|bridge Postgres role password (chart database.passwordKeyName): the bootstrap Job CREATEs the role with it and ESO composes ARIA_DATABASE_URL from it. Hex on purpose — it is embedded in a URL."
   "pilot-allowlist|SecureString|bridge|admin-authored, comma separated <pubkey-hex>:<aria_user_id>:<persona>[:<environment>]|BUZZ_PILOT_ALLOWLIST (chart pilotAllowlist.fromSecret) — phase-0 execution authorization. An unlisted pubkey is refused and executes nothing, so an empty value is a valid but useless deploy."
@@ -596,7 +595,6 @@ do_apply() {
     log "  Manager secret (key aria-orchestrator-token); do not generate a"
     log "  different bridge token. Import the reviewed values with:"
     log "    aws ssm put-parameter --region ${REGION} --name ${SSM_PREFIX}/aria-bot-api-token --type SecureString --value file://<file> --no-overwrite"
-    log "    aws ssm put-parameter --region ${REGION} --name ${SSM_PREFIX}/arcadia-docs-mcp-token --type SecureString --value file://<file> --no-overwrite"
     log "    aws ssm put-parameter --region ${REGION} --name ${SSM_PREFIX}/aria-orchestrator-token --type SecureString --value file://<file> --no-overwrite"
     log "    aws ssm put-parameter --region ${REGION} --name ${SSM_PREFIX}/pilot-allowlist --type SecureString --value file://<file> --no-overwrite"
     log ""
